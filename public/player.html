@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TogetherVideo - Player</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+        :root {
+            --background: #111827;
+            --surface: #1F2937;
+            --primary: #38BDF8;
+            --text-main: #F9FAFB;
+            --text-secondary: #9CA3AF;
+            --border: #374151;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            background-color: var(--background);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: var(--text-main);
+        }
+        .player-container {
+            width: 90%;
+            max-width: 1200px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .status-fullscreen {
+            text-align: center;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 30; /* High z-index */
+            padding: 2rem;
+            box-sizing: border-box;
+        }
+        .unmute-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 15; /* Above video, below panels */
+            cursor: pointer;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        .unmute-overlay.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+        .unmute-overlay span {
+            margin-top: 1rem;
+            font-size: 1.25rem;
+            font-weight: 500;
+        }
+        #unmute-button {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 1rem 2rem;
+            font-size: 1.25rem;
+            font-weight: 600;
+            background-color: var(--primary);
+            color: var(--background);
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            z-index: 10;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            opacity: 0; /* Hidden by default */
+            visibility: hidden;
+        }
+        #unmute-button.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+        #video-title {
+            font-size: 1.25rem;
+            font-weight: 500;
+            text-align: center;
+            word-break: break-all;
+        }
+        video {
+            width: 100%;
+            border-radius: 0.5rem;
+            border: 1px solid var(--border);
+        }
+        .back-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            margin-top: 1rem;
+            padding: 0.5em 1em;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            transition: all 0.2s ease-in-out;
+            text-align: center;
+        }
+        .back-link:hover {
+            background-color: var(--surface);
+            color: var(--text-main);
+            border-color: var(--text-secondary);
+        }
+        /* Subtitle Customization Styles */
+        .settings-container {
+            position: absolute;
+            bottom: 12px; /* Position vertically inside the control bar area */
+            right: 55px;  /* Position to the left of the native 'more' button */
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: none;
+        }
+
+        #video-wrapper:hover .settings-container {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #settings-button {
+            background: rgba(30, 30, 30, 0.7);
+            border: 1px solid rgba(100, 100, 100, 0.5);
+            color: white;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.6;
+            transition: opacity 0.2s ease;
+        }
+        #settings-button:hover {
+            opacity: 1;
+        }
+        #settings-panel {
+            display: none;
+            position: absolute;
+            bottom: 110%; /* Position above the button */
+            right: 0;
+            background: rgba(20, 20, 20, 0.95);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            width: 250px;
+        }
+        .settings-panel-group {
+            margin-bottom: 1rem;
+        }
+        .settings-panel-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+        .settings-panel-group select, .settings-panel-group input {
+            width: 100%;
+            background: var(--surface);
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.5rem;
+        }
+        /* Hide the native fullscreen button */
+        video::-webkit-media-controls-fullscreen-button {
+            display: none;
+        }
+        #fullscreen-button {
+            background: rgba(30, 30, 30, 0.7);
+            border: 1px solid rgba(100, 100, 100, 0.5);
+            color: white;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.6;
+            transition: opacity 0.2s ease;
+        }
+        #fullscreen-button:hover {
+            opacity: 1;
+        }
+        #subtitle-container {
+            position: absolute;
+            bottom: 80px; /* Position above controls */
+            left: 0;
+            right: 0;
+            text-align: center;
+            pointer-events: none; /* Let clicks pass through to video */
+            color: var(--cue-color, white);
+            font-size: var(--cue-font-size, 1.5rem);
+            font-family: 'Inter', sans-serif;
+            line-height: 1.2;
+            visibility: hidden; /* Hidden by default */
+        }
+        #subtitle-container span {
+            background-color: var(--cue-bg, rgba(0, 0, 0, 0.7));
+            padding: 0.2em 0.6em;
+            border-radius: 4px;
+            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+            /* Ensures background is applied per-line correctly for multi-line subtitles */
+            -webkit-box-decoration-break: clone;
+            box-decoration-break: clone;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: rgba(27, 27, 27, 0.8);
+            display: flex;
+            align-items: center;
+            padding: 0.5rem;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: none;
+        }
+
+        #video-wrapper:hover .controls {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        
+        .control-button {
+            background: transparent;
+            border: none;
+            color: white;
+            cursor: pointer;
+            padding: 0.5rem;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+        .control-button:hover {
+            opacity: 1;
+        }
+
+        .seek-bar {
+            flex-grow: 1;
+            margin: 0 1rem;
+            cursor: pointer;
+        }
+
+        .volume-bar {
+            width: 80px;
+            margin-right: 1rem;
+            cursor: pointer;
+        }
+
+        .time-display {
+            margin: 0 1rem;
+            font-size: 0.9rem;
+            color: #E5E7EB;
+        }
+        
+        .spacer {
+            flex-grow: 1;
+        }
+
+        #cc-panel {
+            right: 50px; /* Position next to the settings button */
+        }
+        
+        .selection-panel {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            /* right positioning is handled by specific panel IDs */
+            background: rgba(28, 28, 28, 0.95);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.5rem;
+            width: 180px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .selection-panel button {
+            display: block;
+            width: 100%;
+            background: none;
+            border: none;
+            color: var(--text-main);
+            text-align: left;
+            padding: 0.6rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .selection-panel button:hover {
+            background-color: var(--surface);
+        }
+        
+        .selection-panel button.active {
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        /* Hide the native fullscreen button */
+        video::-webkit-media-controls-fullscreen-button {
+            display: none;
+        }
+
+        #status-message {
+            position: absolute;
+            top: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 0.5rem 1.5rem;
+            border-radius: 1rem;
+            z-index: 25;
+            font-size: 1rem;
+            font-weight: 500;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        #status-message.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #user-count-display {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 0.4rem 0.8rem;
+            border-radius: 1rem;
+            z-index: 25;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 500;
+            opacity: 0;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        #user-count-display.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #video-wrapper.ui-visible .controls,
+        #video-wrapper.ui-visible .settings-container,
+        #video-wrapper.ui-visible #user-count-display {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #status-message {
+            position: absolute;
+            top: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 0.4rem 0.8rem;
+            border-radius: 1rem;
+            z-index: 25;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 500;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div id="join-overlay" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; background: var(--background); position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 100;">
+        <h1 style="font-size: 2.5rem; color: var(--text-main); margin-bottom: 1rem;">Watch Together</h1>
+        <p style="font-size: 1.1rem; color: var(--text-secondary); margin-bottom: 2rem;">Click below to join the video session.</p>
+        <button id="join-button" style="padding: 1rem 2rem; font-size: 1.25rem; font-weight: 600; background-color: var(--primary); color: var(--background); border: none; border-radius: 0.5rem; cursor: pointer;">Join Session</button>
+    </div>
+
+    <div class="player-container" style="display: none;">
+        <h1 id="video-title"></h1>
+        <div id="video-wrapper" style="position: relative;">
+            <video id="video-player" preload="metadata">
+                Your browser does not support the video tag.
+            </video>
+            <div id="play-prompt-overlay" class="status-fullscreen" style="display: none; cursor: pointer;">
+                <h1>Your partner has started playing.</h1>
+                <p>Click anywhere to begin playback.</p>
+            </div>
+            <div id="status-message"></div>
+            <div id="user-count-display"></div>
+            <div id="subtitle-container"></div>
+            <div id="custom-controls" class="controls">
+                <button id="rewind-button" class="control-button" title="Rewind 10s">
+                    <svg fill="currentColor" viewBox="0 0 24 24" width="22" height="22"><path d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7v9h9l-3.6-3.6c1.5-1.2,3.4-2,5.6-2c3.88,0,7.09,2.84,7.44,6.5h1.51C20.91,12.28,17.15,8,12.5,8z"/></svg>
+                </button>
+                <button id="play-pause-button" class="control-button"></button>
+                <button id="forward-button" class="control-button" title="Forward 10s">
+                    <svg fill="currentColor" viewBox="0 0 24 24" width="22" height="22" style="transform: scaleX(-1);"><path d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7v9h9l-3.6-3.6c1.5-1.2,3.4-2,5.6-2c3.88,0,7.09,2.84,7.44,6.5h1.51C20.91,12.28,17.15,8,12.5,8z"/></svg>
+                </button>
+                <input type="range" id="seek-bar" class="seek-bar" value="0" step="0.1">
+                <div id="time-display" class="time-display">00:00 / 00:00</div>
+                <button id="volume-button" class="control-button"></button>
+                <input type="range" id="volume-bar" class="volume-bar" min="0" max="1" step="0.01" value="1">
+                <div class="spacer"></div>
+                <button id="cc-button" class="control-button" title="Subtitles / CC">CC</button>
+                <div id="cc-panel" class="selection-panel"></div>
+                <button id="settings-button" class="control-button" title="Subtitle Settings">
+                    <svg fill="currentColor" viewBox="0 0 20 20" width="18" height="18"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-1.57 1.57a1.532 1.532 0 01-.947 2.287c-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 1.57 1.57a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.532 1.532 0 012.287-.947c1.372.836 2.942-.734 1.57-1.57a1.532 1.532 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-1.57-1.57a1.532 1.532 0 01-2.286-.948zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path></svg>
+                </button>
+                 <div id="settings-panel">
+                    <div class="settings-panel-group">
+                        <label for="font-size">Font Size</label>
+                        <select id="font-size">
+                            <option value="1.0rem">Small</option>
+                            <option value="1.5rem" selected>Medium</option>
+                            <option value="2.0rem">Large</option>
+                            <option value="2.5rem">Extra Large</option>
+                        </select>
+                    </div>
+                    <div class="settings-panel-group">
+                        <label for="bg-color">Background Color</label>
+                        <select id="bg-color">
+                            <option value="rgba(0,0,0,0.7)">Black (70%)</option>
+                            <option value="rgba(0,0,0,0.4)">Black (40%)</option>
+                            <option value="transparent" selected>Transparent</option>
+                        </select>
+                    </div>
+                    <div class="settings-panel-group">
+                        <label for="font-color">Font Color</label>
+                        <select id="font-color">
+                            <option value="white" selected>White</option>
+                            <option value="yellow">Yellow</option>
+                            <option value="#38BDF8">Light Blue</option>
+                        </select>
+                    </div>
+                </div>
+                <button id="next-episode-button" class="control-button" title="Next Episode" style="display: none;">
+                    <svg fill="currentColor" viewBox="0 0 24 24" width="20" height="20"><path d="M4 5v14l7-7zm7 0v14l7-7zm7 0v14h2V5z" /></svg>
+                </button>
+                <button id="fullscreen-button" class="control-button" title="Toggle Fullscreen"></button>
+            </div>
+        </div>
+        <a href="/" class="back-link">Back to Video List</a>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- Element References ---
+    const joinOverlay = document.getElementById('join-overlay');
+    const joinButton = document.getElementById('join-button');
+    const playerContainer = document.querySelector('.player-container');
+    const videoPlayer = document.getElementById('video-player');
+    const videoTitle = document.getElementById('video-title');
+    const videoWrapper = document.getElementById('video-wrapper');
+    const playPauseButton = document.getElementById('play-pause-button');
+    const rewindButton = document.getElementById('rewind-button');
+    const forwardButton = document.getElementById('forward-button');
+    const seekBar = document.getElementById('seek-bar');
+    const timeDisplay = document.getElementById('time-display');
+    const volumeButton = document.getElementById('volume-button');
+    const volumeBar = document.getElementById('volume-bar');
+    const fullscreenButton = document.getElementById('fullscreen-button');
+    const playPromptOverlay = document.getElementById('play-prompt-overlay');
+    const statusMessage = document.getElementById('status-message');
+    const userCountDisplay = document.getElementById('user-count-display');
+    const settingsButton = document.getElementById('settings-button');
+    const settingsPanel = document.getElementById('settings-panel');
+    const fontSizeSelect = document.getElementById('font-size');
+    const bgColorSelect = document.getElementById('bg-color');
+    const fontColorSelect = document.getElementById('font-color');
+    const ccButton = document.getElementById('cc-button');
+    const ccPanel = document.getElementById('cc-panel');
+    const subtitleContainer = document.getElementById('subtitle-container');
+    const nextEpisodeButton = document.getElementById('next-episode-button');
+
+    // --- State & Config ---
+    const params = new URLSearchParams(window.location.search);
+    const videoFile = params.get('video');
+    const socket = io({ autoConnect: false }); // Wait for user interaction
+    let hasJoined = false;
+    let uiVisibilityTimeout;
+    let cues = [];
+    let availableSubtitles = [];
+    let activeSubtitleUrl = null;
+    let userMuted = false;
+    let isWatchingAlone = false;
+    let currentUserCount = 0;
+    let progressSaveInterval = null;
+    let isProblematicVideo = false;
+    let actualDuration = 0; // Will be fetched from the API
+    let seekingTimeout = null;
+    let seekOffset = 0; // The crucial offset for problematic video timestamps
+
+    // --- Icons ---
+    const playIcon = `<svg fill="currentColor" viewBox="0 0 20 20" width="20" height="20"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"></path></svg>`;
+    const pauseIcon = `<svg fill="currentColor" viewBox="0 0 20 20" width="20" height="20"><path d="M5.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75A.75.75 0 007.25 3h-1.5zm7 0a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 00.75-.75V3.75a.75.75 0 00-.75-.75h-1.5z"></path></svg>`;
+    const volumeHighIcon = `<svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" width="20" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`;
+    const volumeLowIcon = `<svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" width="20" fill="currentColor"><path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"/></svg>`;
+    const volumeMutedIcon = `<svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" width="20" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`;
+    const fullscreenEnterIcon = `<svg fill="currentColor" viewBox="0 0 24 24" width="20" height="20"><path d="M5,5H10V7H7V10H5V5M14,5H19V10H17V7H14V5M17,14H19V19H14V17H17V14M7,17H10V19H5V14H7V17Z" /></svg>`;
+    const fullscreenExitIcon = `<svg fill="currentColor" viewBox="0 0 24 24" width="20" height="20"><path d="M14,14H19V16H16V19H14V14M5,14H10V19H8V16H5V14M8,5H10V10H5V8H8V5M19,8V10H14V5H16V8H19Z" /></svg>`;
+
+    // --- Helper Functions ---
+    const formatTime = (seconds) => {
+        if (isNaN(seconds) || seconds === Infinity) return '00:00';
+        const date = new Date(seconds * 1000);
+        const hh = date.getUTCHours();
+        const mm = date.getUTCMinutes();
+        const ss = date.getUTCSeconds().toString().padStart(2, '0');
+        if (hh) {
+            return `${hh}:${mm.toString().padStart(2, '0')}:${ss}`;
+        }
+        return `${mm}:${ss}`;
+    };
+    const updatePlayPauseIcon = () => { playPauseButton.innerHTML = videoPlayer.paused ? playIcon : pauseIcon; };
+    const updateVolumeIcon = () => {
+        if (videoPlayer.muted || videoPlayer.volume === 0) volumeButton.innerHTML = volumeMutedIcon;
+        else if (videoPlayer.volume < 0.5) volumeButton.innerHTML = volumeLowIcon;
+        else volumeButton.innerHTML = volumeHighIcon;
+    };
+    const showUI = () => {
+        videoWrapper.classList.add('ui-visible');
+        clearTimeout(uiVisibilityTimeout);
+        if (!videoPlayer.paused) {
+            uiVisibilityTimeout = setTimeout(() => videoWrapper.classList.remove('ui-visible'), 3000);
+        }
+    };
+    const showStatus = (message, duration = 2000) => {
+        statusMessage.textContent = message;
+        statusMessage.classList.add('visible');
+        setTimeout(() => statusMessage.classList.remove('visible'), duration);
+    };
+    
+    const seek = (offset) => {
+        if (!hasJoined) return;
+        const duration = actualDuration > 0 ? actualDuration : videoPlayer.duration;
+        if (!duration || !isFinite(duration)) return;
+
+        // Calculate seek time based on the *effective* current time
+        const effectiveTime = videoPlayer.currentTime + seekOffset;
+        const newTime = Math.max(0, Math.min(duration, effectiveTime + offset));
+
+        // Use the new seek method for problematic videos
+        if (isProblematicVideo) {
+            handleSeek(newTime);
+        } else {
+            videoPlayer.currentTime = newTime;
+        }
+
+        socket.emit('seek', { time: newTime });
+        // Also update the seek bar visually immediately
+        seekBar.value = newTime;
+        timeDisplay.textContent = `${formatTime(newTime)} / ${formatTime(duration)}`;
+    };
+
+    const handleSeek = (time) => {
+        // When seeking on a problematic video, we change the source and reload.
+        // We keep track of the current playback state to resume it after seeking.
+        const wasPaused = videoPlayer.paused;
+        
+        // This is the new base time for the fresh stream.
+        seekOffset = time;
+
+        const cleanSrc = videoPlayer.currentSrc.split('?')[0];
+        videoPlayer.src = `${cleanSrc}?t=${time}`;
+        videoPlayer.load(); // This will trigger the 'loadeddata' event
+        
+        // We want to resume playback after the new stream has loaded.
+        const onLoaded = () => {
+            // We no longer set currentTime here. The new stream starts at 0, 
+            // and we'll use seekOffset to calculate the true time.
+            if (!wasPaused) {
+                videoPlayer.play().catch(e => console.error("Autoplay after seek failed:", e));
+            }
+            videoPlayer.removeEventListener('loadeddata', onLoaded);
+        };
+        videoPlayer.addEventListener('loadeddata', onLoaded);
+    };
+
+    // --- Subtitle Helper Functions ---
+    const applySubtitleStyles = () => {
+        const fontSize = localStorage.getItem('subtitleFontSize') || '1.5rem';
+        const bgColor = localStorage.getItem('subtitleBgColor') || 'rgba(0,0,0,0.7)';
+        const fontColor = localStorage.getItem('subtitleFontColor') || 'white';
+        videoWrapper.style.setProperty('--cue-font-size', fontSize);
+        videoWrapper.style.setProperty('--cue-bg', bgColor);
+        videoWrapper.style.setProperty('--cue-color', fontColor);
+        fontSizeSelect.value = fontSize;
+        bgColorSelect.value = bgColor;
+        fontColorSelect.value = fontColor;
+    };
+    const parseVttTimeToSeconds = (t) => t.split(':').reduce((acc, time) => (60 * acc) + parseFloat(time.replace(',', '.')), 0);
+    const parseVtt = (vttText) => {
+        const lines = vttText.trim().replace(/\r/g, '').split('\n');
+        const parsedCues = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes('-->')) {
+                const [startStr, endStr] = lines[i].split(' --> ');
+                const text = [];
+                i++;
+                while (lines[i] && lines[i].trim() !== '') {
+                    text.push(lines[i]);
+                    i++;
+                }
+                parsedCues.push({
+                    start: parseVttTimeToSeconds(startStr),
+                    end: parseVttTimeToSeconds(endStr.split(' ')[0]),
+                    text: text.join('<br>')
+                });
+            }
+        }
+        return parsedCues;
+    };
+    const updateCcPanel = () => {
+        ccPanel.innerHTML = '';
+        const offBtn = document.createElement('button');
+        offBtn.textContent = 'Off';
+        offBtn.onclick = () => { loadSubtitles(null); ccPanel.style.display = 'none'; };
+        if (!activeSubtitleUrl) offBtn.classList.add('active');
+        ccPanel.appendChild(offBtn);
+        availableSubtitles.forEach(sub => {
+            const btn = document.createElement('button');
+            btn.textContent = sub.lang;
+            btn.onclick = () => { loadSubtitles(sub.url); ccPanel.style.display = 'none'; };
+            if (sub.url === activeSubtitleUrl) btn.classList.add('active');
+            ccPanel.appendChild(btn);
+        });
+    };
+    const loadSubtitles = (url) => {
+        // Set the active URL state immediately so the UI can update correctly.
+        activeSubtitleUrl = url;
+        // Update the button states after the active URL has been set.
+        updateCcPanel();
+
+        if (!url) {
+            cues = [];
+            subtitleContainer.style.visibility = 'hidden';
+        } else {
+            fetch(url).then(r => r.text()).then(text => {
+                // To prevent race conditions, only apply cues if this is still the active track.
+                if (activeSubtitleUrl === url) {
+                    cues = parseVtt(text);
+                }
+            });
+        }
+    };
+
+    // --- Initial Page Setup ---
+    if (!videoFile) {
+        document.body.innerHTML = `<div class="status-fullscreen"><h1>No video specified.</h1><a href="/" class="back-link">Back to Video List</a></div>`;
+        return;
+    }
+    videoTitle.textContent = videoFile.split('/').pop();
+    
+    // Fetch the accurate duration first, then load the video. This fixes UI issues
+    // with transcoded streams that don't report their duration correctly.
+    fetch(`/api/video-info?video=${encodeURIComponent(videoFile)}`)
+        .then(res => {
+            if (!res.ok) throw new Error('Failed to fetch video info');
+            return res.json();
+        })
+        .then(data => {
+            actualDuration = data.duration;
+            isProblematicVideo = data.isProblematic; // Store whether we need the special seek logic
+            const duration = actualDuration > 0 ? actualDuration : videoPlayer.duration;
+            seekBar.max = duration;
+            timeDisplay.textContent = `${formatTime(0)} / ${formatTime(duration)}`;
+        })
+        .catch(err => console.error("Could not fetch accurate duration:", err))
+        .finally(() => {
+            // Always load the video source, even if the duration fetch failed.
+            videoPlayer.src = `/videos/${videoFile}`;
+        });
+
+    const initializeSession = () => {
+        socket.connect();
+
+        // If metadata has already loaded before this was called, set up the seek bar manually.
+        if (videoPlayer.readyState >= 1) { // HAVE_METADATA
+            const duration = actualDuration > 0 ? actualDuration : videoPlayer.duration;
+            seekBar.max = duration;
+            timeDisplay.textContent = `${formatTime(videoPlayer.currentTime)} / ${formatTime(duration)}`;
+        }
+        
+        // --- Socket Event Handlers (Receiving) ---
+        socket.on('connect', () => socket.emit('joinRoom', { videoFile }));
+        socket.on('joined', () => {
+            hasJoined = true;
+            socket.emit('getProgress', { videoFile });
+            socket.emit('checkNextVideo', { videoFile });
+
+            // Autoplay if requested from the previous page
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('autoplay') === 'true') {
+                // Try to play locally. This might be blocked by the browser on new page loads.
+                videoPlayer.play().catch(err => {
+                    if (err.name === 'NotAllowedError') {
+                        // If autoplay is blocked, show the prompt. The user is already in sync.
+                        playPromptOverlay.style.display = 'flex';
+                    }
+                });
+                
+                // Tell the server to start playback for the other client.
+                socket.emit('play', { time: videoPlayer.currentTime });
+
+                // Clean the URL to prevent re-triggering on refresh
+                urlParams.delete('autoplay');
+                const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+                window.history.replaceState({}, document.title, newUrl);
+            }
+
+            // Start saving progress periodically
+            clearInterval(progressSaveInterval);
+            progressSaveInterval = setInterval(() => {
+                if (hasJoined && !videoPlayer.paused && videoPlayer.duration) {
+                    socket.emit('saveProgress', { videoFile, time: videoPlayer.currentTime });
+                }
+            }, 15000); // Save every 15 seconds
+        });
+        socket.on('roomFull', () => {
+            document.body.innerHTML = `<div class="status-fullscreen"><h1>Session is Full</h1><p>The max number of users has been reached.</p><a href="/" class="back-link">Back to Video List</a></div>`;
+        });
+        socket.on('loadProgress', (data) => { 
+            if (isProblematicVideo) {
+                handleSeek(data.time);
+            } else {
+                videoPlayer.currentTime = data.time; 
+            }
+        });
+        socket.on('play', async (data) => {
+            const effectiveTime = videoPlayer.currentTime + seekOffset;
+            if (Math.abs(effectiveTime - data.time) > 1.5) {
+                if (isProblematicVideo) {
+                    handleSeek(data.time);
+                } else {
+                    videoPlayer.currentTime = data.time;
+                }
+            }
+            try {
+                // Because of the initial user gesture, we can now attempt to unmute and play.
+                videoPlayer.muted = false; 
+                await videoPlayer.play();
+                showStatus("Playback resumed by partner");
+            } catch (err) {
+                if (err.name === 'NotAllowedError') {
+                    // Fallback just in case, though it shouldn't be needed now.
+                    playPromptOverlay.style.display = 'flex';
+                }
+            }
+        });
+        socket.on('pause', (data) => {
+            if (Math.abs(videoPlayer.currentTime - data.time) > 1) videoPlayer.currentTime = data.time;
+            videoPlayer.pause();
+            showStatus("Playback paused by partner");
+        });
+        socket.on('seek', (data) => {
+            if (Math.abs(videoPlayer.currentTime - data.time) > 1) {
+                // Other clients seeking on a problematic video will trigger a reload for us.
+                if (isProblematicVideo) {
+                    handleSeek(data.time);
+                } else {
+                    videoPlayer.currentTime = data.time;
+                }
+            }
+        });
+        socket.on('userCountUpdate', ({ count }) => {
+            currentUserCount = count;
+            userCountDisplay.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" height="16" viewBox="0 0 24 24" width="16" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg> <span>${count}</span>`;
+            userCountDisplay.classList.add('visible');
+            if (count > 1) {
+                isWatchingAlone = false; // A partner is here, so not watching alone.
+            }
+            showUI();
+        });
+        socket.on('partnerLeft', () => {
+            videoPlayer.pause();
+            isWatchingAlone = true; // The partner left, so they are now potentially watching alone.
+            showStatus("Your partner has left the session.", 5000);
+        });
+        socket.on('nextVideoAvailable', ({ available }) => {
+            if (available) {
+                nextEpisodeButton.style.display = 'flex';
+            } else {
+                nextEpisodeButton.style.display = 'none';
+            }
+        });
+        socket.on('loadNextVideo', ({ video }) => {
+            showStatus(`Loading next episode...`, 2000);
+            // Add a small delay to allow the user to see the message
+            setTimeout(() => {
+                window.location.href = `/player.html?video=${encodeURIComponent(video)}&autoplay=true`;
+            }, 1000);
+        });
+
+        // --- Local Control Handlers (Emitting) ---
+        playPauseButton.addEventListener('click', () => {
+            if (!hasJoined) return;
+            if (videoPlayer.paused) {
+                if (isWatchingAlone) {
+                    if (confirm("Your partner has left the session. Are you sure you want to continue watching alone?")) {
+                        // User wants to continue alone.
+                        isWatchingAlone = false; // Don't ask again.
+                        videoPlayer.play();
+                        showStatus("Playback resumed");
+                    }
+                } else if (currentUserCount < 2) {
+                     if (confirm("Your partner is not in the session yet. Are you sure you want to watch alone?")) {
+                        videoPlayer.play();
+                        socket.emit('play', { time: videoPlayer.currentTime });
+                        showStatus("You started playback");
+                    }
+                } else {
+                    // Standard play when with a partner.
+                    videoPlayer.play();
+                    socket.emit('play', { time: videoPlayer.currentTime });
+                    showStatus("You resumed playback");
+                }
+            } else {
+                videoPlayer.pause();
+                socket.emit('pause', { time: videoPlayer.currentTime, videoFile });
+                showStatus("You paused playback");
+            }
+        });
+        rewindButton.addEventListener('click', () => seek(-10));
+        forwardButton.addEventListener('click', () => seek(10));
+        seekBar.addEventListener('input', () => {
+            if (!hasJoined) return;
+            const newTime = parseFloat(seekBar.value);
+            
+            // Update the time display while dragging for a smoother UX
+            const duration = actualDuration > 0 ? actualDuration : videoPlayer.duration;
+            timeDisplay.textContent = `${formatTime(newTime)} / ${formatTime(duration)}`;
+            
+            // For problematic videos, we use our new robust seeking method.
+            // For standard videos, setting currentTime is enough and much smoother.
+            if (isProblematicVideo) {
+                // To avoid sending too many requests while dragging, we use a timeout.
+                clearTimeout(seekingTimeout);
+                seekingTimeout = setTimeout(() => {
+                    handleSeek(newTime);
+                    socket.emit('seek', { time: newTime });
+                }, 250); // Seek after 250ms of no movement
+            } else {
+                videoPlayer.currentTime = newTime;
+                socket.emit('seek', { time: newTime });
+            }
+        });
+        volumeButton.addEventListener('click', () => { 
+            videoPlayer.muted = !videoPlayer.muted;
+            userMuted = videoPlayer.muted;
+        });
+        volumeBar.addEventListener('input', (e) => {
+            const newVolume = parseFloat(e.target.value);
+            videoPlayer.volume = newVolume;
+            if (newVolume > 0) {
+                if (videoPlayer.muted) videoPlayer.muted = false;
+                userMuted = false;
+            } else {
+                if (!videoPlayer.muted) videoPlayer.muted = true;
+                userMuted = true;
+            }
+        });
+        fullscreenButton.addEventListener('click', () => {
+            if (!document.fullscreenElement) videoWrapper.requestFullscreen();
+            else document.exitFullscreen();
+        });
+        videoPlayer.addEventListener('click', () => playPauseButton.click());
+        playPromptOverlay.addEventListener('click', () => {
+            playPromptOverlay.style.display = 'none';
+            if (!userMuted) {
+                videoPlayer.muted = false;
+            }
+            socket.emit('play', { time: videoPlayer.currentTime });
+        });
+        
+        nextEpisodeButton.addEventListener('click', () => {
+            if (hasJoined) {
+                // Mark current episode as finished before switching
+                const duration = actualDuration > 0 ? actualDuration : videoPlayer.duration;
+                if (duration) {
+                    socket.emit('saveProgress', { videoFile, time: duration });
+                }
+                socket.emit('requestNextVideo', { videoFile });
+            }
+        });
+
+        // --- Video Element Listeners (UI Only) ---
+        videoPlayer.addEventListener('ended', () => {
+            // When the video finishes, check if the next episode button is visible.
+            const isNextAvailable = nextEpisodeButton.style.display !== 'none';
+            if (hasJoined && isNextAvailable) {
+                showStatus("Starting next episode...", 2000);
+                // A short delay to allow the status message to be seen and for a smoother transition.
+                setTimeout(() => {
+                    // Programmatically click the button to trigger the next-episode logic for everyone.
+                    nextEpisodeButton.click(); 
+                }, 1500);
+            }
+        });
+        videoPlayer.addEventListener('play', () => { updatePlayPauseIcon(); showUI(); });
+        videoPlayer.addEventListener('pause', () => { updatePlayPauseIcon(); showUI(); clearTimeout(uiVisibilityTimeout); });
+        videoPlayer.addEventListener('volumechange', updateVolumeIcon);
+        videoPlayer.addEventListener('loadedmetadata', () => {
+            const duration = actualDuration > 0 ? actualDuration : videoPlayer.duration;
+            seekBar.max = duration;
+            // When metadata loads, the effective time is just our offset, since currentTime is 0
+            timeDisplay.textContent = `${formatTime(seekOffset)} / ${formatTime(duration)}`;
+        });
+    videoPlayer.addEventListener('timeupdate', () => {
+            const effectiveTime = videoPlayer.currentTime + seekOffset;
+            seekBar.value = effectiveTime;
+            const duration = actualDuration > 0 ? actualDuration : videoPlayer.duration;
+            timeDisplay.textContent = `${formatTime(effectiveTime)} / ${formatTime(duration)}`;
+
+            // Handle subtitle display
+        const activeCue = cues.find(cue => effectiveTime >= cue.start && effectiveTime < cue.end);
+        if (activeCue) {
+            subtitleContainer.innerHTML = `<span>${activeCue.text}</span>`;
+            subtitleContainer.style.visibility = 'visible';
+        } else {
+            subtitleContainer.style.visibility = 'hidden';
+        }
+    });
+        document.addEventListener('fullscreenchange', () => {
+            fullscreenButton.innerHTML = document.fullscreenElement ? fullscreenExitIcon : fullscreenEnterIcon;
+        });
+
+        // --- Subtitle & Settings Setup ---
+    fetch(`/api/subtitles?video=${encodeURIComponent(videoFile)}`).then(r => r.json()).then(data => {
+        availableSubtitles = data.subtitles || [];
+            if (availableSubtitles.length > 0) {
+                // Load the first subtitle track by default.
+                loadSubtitles(availableSubtitles[0].url);
+            } else {
+                // Or ensure the UI is correctly set to 'Off' if none are available.
+                ccButton.style.display = 'none';
+                loadSubtitles(null);
+            }
+        }).catch(() => {
+            ccButton.style.display = 'none';
+            loadSubtitles(null); // Also handle the 'Off' state on error.
+        });
+
+    settingsButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        ccPanel.style.display = 'none';
+        settingsPanel.style.display = settingsPanel.style.display === 'block' ? 'none' : 'block';
+    });
+    ccButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        settingsPanel.style.display = 'none';
+        ccPanel.style.display = ccPanel.style.display === 'block' ? 'none' : 'block';
+    });
+    document.addEventListener('click', () => {
+        settingsPanel.style.display = 'none';
+        ccPanel.style.display = 'none';
+    });
+
+        // Prevent panels from closing when they are clicked inside.
+        settingsPanel.addEventListener('click', (e) => e.stopPropagation());
+        ccPanel.addEventListener('click', (e) => e.stopPropagation());
+
+    fontSizeSelect.addEventListener('change', (e) => { localStorage.setItem('subtitleFontSize', e.target.value); applySubtitleStyles(); });
+    bgColorSelect.addEventListener('change', (e) => { localStorage.setItem('subtitleBgColor', e.target.value); applySubtitleStyles(); });
+    fontColorSelect.addEventListener('change', (e) => { localStorage.setItem('subtitleFontColor', e.target.value); applySubtitleStyles(); });
+
+        // --- Set Initial UI State ---
+    updatePlayPauseIcon();
+    updateVolumeIcon();
+    applySubtitleStyles();
+    fullscreenButton.innerHTML = fullscreenEnterIcon;
+    videoWrapper.addEventListener('mousemove', showUI);
+    showUI();
+    };
+
+    // Auto-join if the user has already interacted in this session
+    if (sessionStorage.getItem('hasInteracted') === 'true') {
+        joinOverlay.style.display = 'none';
+        playerContainer.style.display = 'block';
+        initializeSession();
+    }
+
+    joinButton.addEventListener('click', () => {
+        sessionStorage.setItem('hasInteracted', 'true');
+        joinOverlay.style.display = 'none';
+        playerContainer.style.display = 'block';
+        initializeSession();
+    });
+
+    window.addEventListener('beforeunload', () => {
+        clearInterval(progressSaveInterval);
+        // Save progress one last time before leaving. This is best-effort.
+        if (hasJoined && !videoPlayer.paused && videoPlayer.duration > 0) {
+            socket.emit('saveProgress', { videoFile, time: videoPlayer.currentTime });
+        }
+    });
+});
+    </script>
+</body>
+</html>
