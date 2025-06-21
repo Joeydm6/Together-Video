@@ -1,0 +1,12 @@
+# Cache files
+.cache/
+subtitles/
+
+# Node.js dependencies
+node_modules/
+
+# Session-specific progress file
+progress.json
+
+# External binaries
+FFMPEG/ 
