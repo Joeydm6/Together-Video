@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Continue Watching Debug</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #111; color: white; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #333; border-radius: 5px; }
+        .error { color: #ff6b6b; }
+        .success { color: #51cf66; }
+        pre { background: #222; padding: 10px; border-radius: 3px; overflow-x: auto; max-height: 400px; }
+        button { background: #38BDF8; color: white; border: none; padding: 10px 15px; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #0ea5e9; }
+    </style>
+</head>
+<body>
+    <h1>Continue Watching Debug</h1>
+    
+    <div class="section">
+        <h2>Test Continue Watching API</h2>
+        <button onclick="testContinueWatching()">Test API</button>
+        <div id="apiResult"></div>
+    </div>
+
+    <div class="section">
+        <h2>Test Card Generation</h2>
+        <button onclick="testCardGeneration()">Generate Test Card</button>
+        <div id="cardResult"></div>
+    </div>
+
+    <script>
+        async function testContinueWatching() {
+            const resultDiv = document.getElementById('apiResult');
+            resultDiv.innerHTML = '<p>Loading...</p>';
+            
+            try {
+                const response = await fetch('/api/recently-watched');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.innerHTML = `
+                        <div class="success">✅ API Success</div>
+                        <p><strong>Items found:</strong> ${data.length}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="error">❌ API Error</div>
+                        <p><strong>Status:</strong> ${response.status}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="error">❌ Network Error</div>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                `;
+            }
+        }
+
+        function createTestCard(item) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.style.cssText = `
+                border: 1px solid #333;
+                border-radius: 8px;
+                padding: 10px;
+                margin: 10px 0;
+                background: #222;
+                max-width: 300px;
+            `;
+            
+            const isContinueWatching = true;
+            
+            if (item.seriesPath) {
+                card.innerHTML = `
+                    <div style="border: 1px solid blue; padding: 5px; margin: 5px 0;">
+                        <a href="player.html?video=${encodeURIComponent(item.url)}" style="color: #38BDF8;">
+                            📺 Play Episode: ${item.episodeName}
+                        </a>
+                    </div>
+                    <div style="border: 1px solid green; padding: 5px; margin: 5px 0;">
+                        <a href="/?path=${encodeURIComponent(item.seriesPath)}" style="color: #51cf66;">
+                            📁 Go to Series: ${item.name}
+                        </a>
+                    </div>
+                    <div>
+                        <strong>Season:</strong> ${item.seasonNumber || 'N/A'}<br>
+                        <strong>Episode:</strong> ${item.episodeNumber || 'N/A'}<br>
+                        <strong>Series Path:</strong> ${item.seriesPath}
+                    </div>
+                `;
+            } else {
+                card.innerHTML = `
+                    <div style="border: 1px solid red; padding: 5px; margin: 5px 0;">
+                        <a href="player.html?video=${encodeURIComponent(item.url)}" style="color: #f87171;">
+                            📺 Play: ${item.name}
+                        </a>
+                    </div>
+                    <div style="color: #fbbf24;">
+                        ⚠️ No seriesPath found - using old structure
+                    </div>
+                `;
+            }
+            
+            return card;
+        }
+
+        async function testCardGeneration() {
+            const resultDiv = document.getElementById('cardResult');
+            resultDiv.innerHTML = '<p>Testing card generation...</p>';
+            
+            try {
+                const response = await fetch('/api/recently-watched');
+                const data = await response.json();
+                
+                if (data && data.length > 0) {
+                    const container = document.createElement('div');
+                    
+                    data.slice(0, 3).forEach(item => {
+                        const card = createTestCard(item);
+                        container.appendChild(card);
+                    });
+                    
+                    resultDiv.innerHTML = '<div class="success">✅ Cards Generated</div>';
+                    resultDiv.appendChild(container);
+                } else {
+                    resultDiv.innerHTML = '<div class="error">❌ No data to generate cards</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        // Auto-run tests on page load
+        window.onload = () => {
+            testContinueWatching();
+        };
+    </script>
+</body>
+</html> 

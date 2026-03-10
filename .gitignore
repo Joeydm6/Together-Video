@@ -1,0 +1,26 @@
+# Cache files
+.cache/
+subtitles/
+backups/
+
+# Node.js dependencies
+node_modules/
+
+# Session-specific progress file
+progress.json
+
+# External binaries
+FFMPEG/ 
+ngrok.exe
+.ngrok.exe.old
+
+# Local secrets
+.env
+.env.local
+.cloudflared/
+.cursor/
+
+# Local logs and temp artifacts
+*.log
+tmp-*
+tunnel-output.txt

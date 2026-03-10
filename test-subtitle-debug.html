@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subtitle Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #111; color: white; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #333; border-radius: 5px; }
+        .error { color: #ff6b6b; }
+        .success { color: #51cf66; }
+        .loading { color: #74c0fc; }
+        pre { background: #222; padding: 10px; border-radius: 3px; overflow-x: auto; max-height: 300px; }
+        input, button { background: #222; color: white; border: 1px solid #555; padding: 8px; border-radius: 3px; margin: 5px; }
+        button { background: #38BDF8; cursor: pointer; }
+        button:hover { background: #0ea5e9; }
+    </style>
+</head>
+<body>
+    <h1>Subtitle Debug Test</h1>
+    
+    <div class="section">
+        <h2>Test Specific Video</h2>
+        <input type="text" id="video-path" placeholder="Enter video path (e.g., Series/ShowName/Season 1/01. Episode.mkv)" style="width: 400px;">
+        <button onclick="testSubtitles()">Test Subtitles</button>
+        <div id="subtitle-results"></div>
+    </div>
+
+    <div class="section">
+        <h2>Test All Recent Videos</h2>
+        <button onclick="testRecentVideos()">Test Recent Videos</button>
+        <div id="recent-results"></div>
+    </div>
+
+    <div class="section">
+        <h2>Server FFmpeg Test</h2>
+        <button onclick="testFFmpeg()">Test FFmpeg Availability</button>
+        <div id="ffmpeg-results"></div>
+    </div>
+
+    <script>
+        const subtitleResults = document.getElementById('subtitle-results');
+        const recentResults = document.getElementById('recent-results');
+        const ffmpegResults = document.getElementById('ffmpeg-results');
+
+        async function testSubtitles() {
+            const videoPath = document.getElementById('video-path').value.trim();
+            if (!videoPath) {
+                subtitleResults.innerHTML = '<div class="error">Please enter a video path</div>';
+                return;
+            }
+
+            subtitleResults.innerHTML = '<div class="loading">Testing subtitles...</div>';
+            
+            try {
+                console.log(`Testing subtitles for: ${videoPath}`);
+                const response = await fetch(`/api/subtitles?video=${encodeURIComponent(videoPath)}`);
+                
+                console.log(`Response status: ${response.status}`);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Subtitle API response:', data);
+                
+                subtitleResults.innerHTML = `
+                    <div class="success">✓ Subtitles API Success</div>
+                    <div>Found ${data.subtitles ? data.subtitles.length : 0} subtitle tracks</div>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                
+                // Test loading one of the subtitles if available
+                if (data.subtitles && data.subtitles.length > 0) {
+                    const firstSub = data.subtitles[0];
+                    console.log(`Testing subtitle file: ${firstSub.url}`);
+                    
+                    try {
+                        const subResponse = await fetch(firstSub.url);
+                        const subText = await subResponse.text();
+                        
+                        subtitleResults.innerHTML += `
+                            <div class="success">✓ Subtitle file accessible</div>
+                            <div>First subtitle: ${firstSub.lang}</div>
+                            <pre>${subText.substring(0, 500)}...</pre>
+                        `;
+                    } catch (subError) {
+                        subtitleResults.innerHTML += `
+                            <div class="error">✗ Subtitle file error: ${subError.message}</div>
+                        `;
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Subtitle test failed:', error);
+                subtitleResults.innerHTML = `
+                    <div class="error">✗ Subtitles API Failed: ${error.message}</div>
+                `;
+            }
+        }
+
+        async function testRecentVideos() {
+            recentResults.innerHTML = '<div class="loading">Testing recent videos...</div>';
+            
+            try {
+                const response = await fetch('/api/recently-watched');
+                const data = await response.json();
+                
+                if (data.length === 0) {
+                    recentResults.innerHTML = '<div class="error">No recent videos found</div>';
+                    return;
+                }
+                
+                recentResults.innerHTML = `<div class="success">Found ${data.length} recent videos</div>`;
+                
+                // Test subtitles for first 3 recent videos
+                for (let i = 0; i < Math.min(3, data.length); i++) {
+                    const video = data[i];
+                    console.log(`Testing video ${i + 1}: ${video.url}`);
+                    
+                    try {
+                        const subResponse = await fetch(`/api/subtitles?video=${encodeURIComponent(video.url)}`);
+                        const subData = await subResponse.json();
+                        
+                        recentResults.innerHTML += `
+                            <div>
+                                <strong>${video.name || video.url}</strong>: 
+                                ${subData.subtitles ? subData.subtitles.length : 0} subtitles
+                            </div>
+                        `;
+                    } catch (error) {
+                        recentResults.innerHTML += `
+                            <div class="error">${video.name || video.url}: Error - ${error.message}</div>
+                        `;
+                    }
+                }
+                
+            } catch (error) {
+                recentResults.innerHTML = `<div class="error">Failed to get recent videos: ${error.message}</div>`;
+            }
+        }
+
+        async function testFFmpeg() {
+            ffmpegResults.innerHTML = '<div class="loading">Testing FFmpeg...</div>';
+            
+            try {
+                // Test a video info call which also tests FFmpeg
+                const response = await fetch('/api/videos');
+                const data = await response.json();
+                
+                if (data.files && data.files.length > 0) {
+                    const firstVideo = data.files[0];
+                    const infoResponse = await fetch(`/api/video-info?video=${encodeURIComponent(firstVideo.url)}`);
+                    const infoData = await infoResponse.json();
+                    
+                    ffmpegResults.innerHTML = `
+                        <div class="success">✓ FFmpeg appears to be working</div>
+                        <div>Transcoding available: ${infoData.transcodingAvailable}</div>
+                        <div>Test video: ${firstVideo.name}</div>
+                        <div>Video codec: ${infoData.videoCodec}</div>
+                        <div>Audio codec: ${infoData.audioCodec}</div>
+                        <pre>${JSON.stringify(infoData, null, 2)}</pre>
+                    `;
+                } else {
+                    ffmpegResults.innerHTML = '<div class="error">No video files found to test FFmpeg</div>';
+                }
+                
+            } catch (error) {
+                ffmpegResults.innerHTML = `<div class="error">FFmpeg test failed: ${error.message}</div>`;
+            }
+        }
+
+        // Auto-load recent videos on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            testRecentVideos();
+        });
+    </script>
+</body>
+</html> 

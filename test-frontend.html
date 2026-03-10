@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VideoStack Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #111; color: white; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #333; border-radius: 5px; }
+        .error { color: #ff6b6b; }
+        .success { color: #51cf66; }
+        .loading { color: #74c0fc; }
+        pre { background: #222; padding: 10px; border-radius: 3px; overflow-x: auto; }
+        button { background: #38BDF8; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; margin: 5px; }
+        button:hover { background: #0ea5e9; }
+    </style>
+</head>
+<body>
+    <h1>VideoStack Frontend Debug Test</h1>
+    
+    <div class="section">
+        <h2>API Test Results</h2>
+        <button onclick="testHomepageAPI()">Test Homepage API</button>
+        <button onclick="testVideosAPI()">Test Videos API</button>
+        <button onclick="testRecentlyWatched()">Test Recently Watched</button>
+        <div id="api-results"></div>
+    </div>
+
+    <div class="section">
+        <h2>Homepage Content Simulation</h2>
+        <div id="homepage-simulation"></div>
+    </div>
+
+    <div class="section">
+        <h2>Console Log</h2>
+        <div id="console-log"></div>
+    </div>
+
+    <script>
+        const resultsDiv = document.getElementById('api-results');
+        const homepageDiv = document.getElementById('homepage-simulation');
+        const consoleDiv = document.getElementById('console-log');
+
+        // Capture console logs
+        const originalLog = console.log;
+        const originalError = console.error;
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            consoleDiv.innerHTML += `<div class="success">[LOG] ${args.join(' ')}</div>`;
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            consoleDiv.innerHTML += `<div class="error">[ERROR] ${args.join(' ')}</div>`;
+        };
+
+        // Test functions
+        async function testHomepageAPI() {
+            resultsDiv.innerHTML = '<div class="loading">Testing homepage API...</div>';
+            try {
+                const response = await fetch('/api/homepage-content');
+                const data = await response.json();
+                
+                resultsDiv.innerHTML = `
+                    <div class="success">✓ Homepage API Success</div>
+                    <div>Categories found: ${Object.keys(data).length}</div>
+                    <div>Total items: ${Object.values(data).reduce((sum, arr) => sum + arr.length, 0)}</div>
+                    <pre>${JSON.stringify(data, null, 2).substring(0, 1000)}...</pre>
+                `;
+                
+                // Simulate homepage rendering
+                simulateHomepage(data);
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">✗ Homepage API Failed: ${error.message}</div>`;
+                console.error('Homepage API error:', error);
+            }
+        }
+
+        async function testVideosAPI() {
+            resultsDiv.innerHTML = '<div class="loading">Testing videos API...</div>';
+            try {
+                const response = await fetch('/api/videos');
+                const data = await response.json();
+                
+                resultsDiv.innerHTML = `
+                    <div class="success">✓ Videos API Success</div>
+                    <div>Directories: ${data.directories.length}</div>
+                    <div>Files: ${data.files.length}</div>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">✗ Videos API Failed: ${error.message}</div>`;
+                console.error('Videos API error:', error);
+            }
+        }
+
+        async function testRecentlyWatched() {
+            resultsDiv.innerHTML = '<div class="loading">Testing recently watched API...</div>';
+            try {
+                const response = await fetch('/api/recently-watched');
+                const data = await response.json();
+                
+                resultsDiv.innerHTML = `
+                    <div class="success">✓ Recently Watched API Success</div>
+                    <div>Items: ${data.length}</div>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">✗ Recently Watched API Failed: ${error.message}</div>`;
+                console.error('Recently Watched API error:', error);
+            }
+        }
+
+        function simulateHomepage(data) {
+            let html = '<h3>Simulated Homepage Rendering</h3>';
+            
+            for (const [categoryName, items] of Object.entries(data)) {
+                html += `
+                    <div style="margin: 20px 0; border: 1px solid #555; padding: 15px; border-radius: 5px;">
+                        <h4>${categoryName} (${items.length} items)</h4>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
+                `;
+                
+                items.forEach(item => {
+                    html += `
+                        <div style="border: 1px solid #777; padding: 10px; border-radius: 3px; background: #222;">
+                            <div style="font-weight: bold; margin-bottom: 5px;">${item.name}</div>
+                            ${item.posterUrl ? `<img src="${item.posterUrl}" style="width: 100%; height: 200px; object-fit: cover;" onerror="this.style.display='none';">` : '<div style="width: 100%; height: 200px; background: #444; display: flex; align-items: center; justify-content: center;">No Image</div>'}
+                            ${item.rating ? `<div>⭐ ${item.rating}</div>` : ''}
+                            ${item.year ? `<div>📅 ${item.year}</div>` : ''}
+                        </div>
+                    `;
+                });
+                
+                html += '</div></div>';
+            }
+            
+            homepageDiv.innerHTML = html;
+        }
+
+        // Auto-run tests
+        console.log('Starting debug tests...');
+        setTimeout(() => {
+            testHomepageAPI();
+        }, 1000);
+    </script>
+</body>
+</html> 

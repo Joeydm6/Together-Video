@@ -1,0 +1,11 @@
+[
+  {
+    "label": "stable-sync-polish",
+    "createdAt": "2026-03-10T23:42:02+01:00",
+    "archive": "C:\\Users\\Joey\\Documents\\Code\\TogetherVideo\\backups\\togethervideo-2026-03-10_23-41-40-stable-sync-polish.zip",
+    "notes": [
+      "Stable snapshot after sync, mobile player, resource and poster fixes.",
+      "Validated with full npm test suite."
+    ]
+  }
+]

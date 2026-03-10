@@ -1,0 +1,17 @@
+{
+  "name": "Tvstack",
+  "short_name": "Tvstack",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1F1F1F",
+  "theme_color": "#1F1F1F",
+  "description": "Synchronized remote video watching from your own library.",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
