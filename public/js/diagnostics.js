@@ -83,6 +83,8 @@ function renderRoomCard(room) {
             <div><dt>Pending action</dt><dd>${room.pendingAction?.type || 'none'}</dd></div>
             <div><dt>Paused</dt><dd>${snapshot.paused ? 'yes' : 'no'}</dd></div>
             <div><dt>Time</dt><dd>${Number.isFinite(snapshot.time) ? `${snapshot.time.toFixed(1)}s` : 'n/a'}</dd></div>
+            <div><dt>Last seek</dt><dd>${snapshot.seekId || 'n/a'}</dd></div>
+            <div><dt>Snapshot source</dt><dd>${snapshot.sourceSocketId ? snapshot.sourceSocketId.slice(0, 8) : 'n/a'}</dd></div>
         </dl>
         <div class="diag-subsection">
             <strong>Clients</strong>

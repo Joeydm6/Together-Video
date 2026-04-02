@@ -3148,6 +3148,7 @@ function updateRoomSyncSnapshot(room, patch = {}) {
         videoFile: patch.videoFile ?? currentSnapshot.videoFile ?? null,
         time: Math.max(0, Number(patch.time ?? currentSnapshot.time) || 0),
         paused: patch.paused ?? currentSnapshot.paused ?? true,
+        seekId: patch.seekId !== undefined ? (patch.seekId || null) : (currentSnapshot.seekId ?? null),
         subtitleUrl: patch.subtitleUrl !== undefined ? patch.subtitleUrl : (currentSnapshot.subtitleUrl ?? null),
         subtitleOffsetMs: Number.parseInt(patch.subtitleOffsetMs ?? currentSnapshot.subtitleOffsetMs ?? 0, 10) || 0,
         audioTrackIndex: patch.audioTrackIndex !== undefined ? patch.audioTrackIndex : (currentSnapshot.audioTrackIndex ?? null),
@@ -3241,6 +3242,7 @@ io.on('connection', (socket) => {
                     videoFile: resolvedMedia.relativePath,
                     time: 0,
                     paused: true,
+                    seekId: null,
                     subtitleUrl: null,
                     subtitleOffsetMs: 0,
                     audioTrackIndex: null,
@@ -3653,6 +3655,7 @@ io.on('connection', (socket) => {
                     updateRoomSyncSnapshot(socket.currentRoom, {
                         videoFile: socket.currentVideoFile,
                         time: data.time,
+                        seekId: data.seekId || null,
                         sourceSocketId: socket.id
                     });
                 }

@@ -70,6 +70,12 @@ async function getTelemetrySummary(port) {
     return response.json();
 }
 
+async function getDiagnosticsRooms(port) {
+    const response = await fetch(`http://127.0.0.1:${port}/api/diagnostics/rooms`);
+    assert.equal(response.ok, true, `Room diagnostics endpoint failed with ${response.status}`);
+    return response.json();
+}
+
 function installMediaMock(page) {
     return page.addInitScript(() => {
         const stateSymbol = Symbol('tv-media-state');
@@ -494,6 +500,11 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
         const telemetryItems = document.querySelectorAll('#recent-telemetry .telemetry-item');
         return Array.from(roomCards).some(card => card.textContent.includes(expectedRoom)) && telemetryItems.length > 0;
     }, roomCode);
+
+    const diagnosticsRooms = await getDiagnosticsRooms(port);
+    const sharedRoom = diagnosticsRooms.sharedRooms.find(room => room.roomCode === roomCode);
+    assert.ok(sharedRoom, `Expected diagnostics payload for room ${roomCode}.\n${serverLogs}`);
+    assert.ok(sharedRoom.syncSnapshot?.seekId, `Expected room snapshot to retain the latest seekId.\n${JSON.stringify(diagnosticsRooms, null, 2)}\n${serverLogs}`);
 });
 
 test('players recover from reconnects and leader handoff', { timeout: 150_000 }, async (t) => {
