@@ -209,6 +209,46 @@ function installCameraMock(page) {
     });
 }
 
+function installDelayedCameraMock(page, delayMs = 180) {
+    return page.addInitScript((startupDelay) => {
+        window.__tvCameraRequests = 0;
+        window.__tvCameraStops = 0;
+        const canvas = document.createElement('canvas');
+        canvas.width = 160;
+        canvas.height = 90;
+        const context = canvas.getContext('2d');
+        if (context) {
+            context.fillStyle = '#35516b';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.fillStyle = '#f7d4de';
+            context.font = '16px sans-serif';
+            context.fillText('Delayed Cam', 16, 48);
+        }
+        const baseStream = canvas.captureStream(8);
+        const decorateStream = (stream) => {
+            for (const track of stream.getTracks()) {
+                const originalStop = track.stop.bind(track);
+                track.stop = () => {
+                    window.__tvCameraStops += 1;
+                    return originalStop();
+                };
+            }
+            return stream;
+        };
+        if (!navigator.mediaDevices) {
+            Object.defineProperty(navigator, 'mediaDevices', {
+                configurable: true,
+                value: {}
+            });
+        }
+        navigator.mediaDevices.getUserMedia = async () => {
+            window.__tvCameraRequests += 1;
+            await new Promise(resolve => window.setTimeout(resolve, startupDelay));
+            return decorateStream(baseStream.clone());
+        };
+    }, delayMs);
+}
+
 test('homepage and player stay usable on mobile-sized screens', { timeout: 120_000 }, async (t) => {
     assert.ok(fs.existsSync(ffmpegPath), `FFmpeg fixture generator not found at ${ffmpegPath}`);
     assert.ok(fs.existsSync(chromePath), `Chrome not found at ${chromePath}`);
@@ -667,4 +707,115 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
     assert.equal(landscapeLayout.mobileShellHidden, true, 'Landscape mobile shell should stay hidden');
     assert.equal(landscapeLayout.immersiveLandscape, true, 'Landscape mode did not enter an immersive player layout');
     assert.equal(landscapeLayout.horizontalOverflowFree, true, 'Landscape player overflows horizontally');
+});
+
+test('camera startup cleanup does not leave a stale stream behind', { timeout: 90_000 }, async (t) => {
+    assert.ok(fs.existsSync(ffmpegPath), `FFmpeg fixture generator not found at ${ffmpegPath}`);
+    assert.ok(fs.existsSync(chromePath), `Chrome not found at ${chromePath}`);
+
+    const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'togethervideo-camera-race-'));
+    const mediaRoot = path.join(tempRoot, 'media');
+    const cacheRoot = path.join(tempRoot, 'cache');
+    const progressPath = path.join(tempRoot, 'progress.json');
+    const seasonDir = path.join(mediaRoot, 'Series', 'Camera Race', 'Season 1');
+    const episodeOne = path.join(seasonDir, 'Camera Race S01E01.mp4');
+
+    await fsp.mkdir(seasonDir, { recursive: true });
+    await fsp.mkdir(cacheRoot, { recursive: true });
+    await fsp.writeFile(progressPath, '{}');
+    createFixtureVideo(episodeOne);
+
+    const port = await getFreePort();
+    const serverProcess = spawn(process.execPath, ['server.js'], {
+        cwd: repoRoot,
+        env: {
+            ...process.env,
+            PORT: String(port),
+            VIDEOS_DIRECTORY: mediaRoot,
+            CACHE_DIRECTORY: cacheRoot,
+            PROGRESS_FILE_PATH: progressPath,
+            TMDB_API_KEY: ''
+        },
+        stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    const cleanup = async () => {
+        if (!serverProcess.killed) {
+            serverProcess.kill('SIGTERM');
+            await delay(500);
+            if (!serverProcess.killed) {
+                serverProcess.kill('SIGKILL');
+            }
+        }
+        await fsp.rm(tempRoot, { recursive: true, force: true });
+    };
+
+    t.after(cleanup);
+
+    await waitForServer(`http://127.0.0.1:${port}/`);
+
+    const browser = await chromium.launch({
+        executablePath: chromePath,
+        headless: true
+    });
+
+    t.after(async () => {
+        await browser.close();
+    });
+
+    const page = await browser.newPage();
+    await installDelayedCameraMock(page, 220);
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
+
+    const result = await page.evaluate(async () => {
+        const module = await import('/js/player/webrtc.js');
+        const states = [];
+        const toasts = [];
+        const emitted = [];
+        const socket = {
+            connected: true,
+            id: 'local-socket',
+            emit(event, payload) {
+                emitted.push({ event, payload });
+            }
+        };
+        const controller = module.createWebcamController({
+            socket,
+            onStateChange(state) {
+                states.push({
+                    busy: state.busy,
+                    localEnabled: state.localEnabled,
+                    connected: state.connected,
+                    statusLabel: state.statusLabel
+                });
+            },
+            onToast(message) {
+                toasts.push(message);
+            }
+        });
+        controller.setJoined(true);
+        const startPromise = controller.toggleCamera();
+        await new Promise(resolve => window.setTimeout(resolve, 40));
+        await controller.cleanup();
+        const started = await startPromise;
+        await new Promise(resolve => window.setTimeout(resolve, 260));
+        return {
+            started,
+            states,
+            toasts,
+            emitted,
+            cameraRequests: window.__tvCameraRequests,
+            cameraStops: window.__tvCameraStops
+        };
+    });
+
+    assert.equal(result.cameraRequests, 1, 'Expected exactly one delayed camera request');
+    assert.ok(result.cameraStops >= 1, `Expected delayed camera stream to be stopped after cleanup.\n${JSON.stringify(result, null, 2)}`);
+    assert.equal(result.started, false, `Camera start should not complete after cleanup.\n${JSON.stringify(result, null, 2)}`);
+    assert.equal(result.states.at(-1)?.localEnabled, false, `Camera controller ended with local camera still enabled.\n${JSON.stringify(result, null, 2)}`);
+    assert.equal(result.states.at(-1)?.busy, false, `Camera controller stayed stuck in a busy state.\n${JSON.stringify(result, null, 2)}`);
+    assert.ok(
+        result.emitted.some(entry => entry.event === 'requestWebcamStateSync'),
+        `Joined webcam controller never requested a state sync.\n${JSON.stringify(result, null, 2)}`
+    );
 });
