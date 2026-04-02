@@ -779,6 +779,8 @@ test('mobile seek recovery avoids snapshot storms after waiting events', { timeo
 
     const finalTelemetry = await getTelemetrySummary(port);
     const snapshotDelta = (finalTelemetry.counts?.snapshot || 0) - baselineSnapshots;
+    const seekTelemetry = finalTelemetry.recent?.find(event => event.type === 'seek' && event.seekId && event.source === 'remote-seek');
+    const settleSnapshotTelemetry = finalTelemetry.recent?.find(event => event.type === 'snapshot' && event.seekId && event.source === 'seek-settle-snapshot');
     const stateAfterSeek = await Promise.all([
         leaderPage.evaluate(() => ({
             time: document.getElementById('video-player').currentTime,
@@ -800,6 +802,8 @@ test('mobile seek recovery avoids snapshot storms after waiting events', { timeo
     );
     assert.equal(stateAfterSeek[0].overlayVisible, false, `Leader unexpectedly returned to the lobby after seek.\n${serverLogs}`);
     assert.equal(stateAfterSeek[1].overlayVisible, false, `Follower unexpectedly returned to the lobby after seek.\n${serverLogs}`);
+    assert.ok(seekTelemetry, `Expected structured seek telemetry after mobile seek.\n${JSON.stringify(finalTelemetry, null, 2)}\n${serverLogs}`);
+    assert.ok(settleSnapshotTelemetry, `Expected structured settle snapshot telemetry after mobile seek.\n${JSON.stringify(finalTelemetry, null, 2)}\n${serverLogs}`);
     assert.ok(
         snapshotDelta <= 1,
         `Mobile seek triggered too many follow-up snapshots (${snapshotDelta}).\n${serverLogs}`

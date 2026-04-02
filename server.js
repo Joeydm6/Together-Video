@@ -310,6 +310,10 @@ function recordPlaybackTelemetry(event = {}) {
         detail: String(event.detail || '').trim(),
         roomCode: String(event.roomCode || '').trim() || null,
         videoFile: String(event.videoFile || '').trim() || null,
+        seekId: String(event.seekId || '').trim() || null,
+        source: String(event.source || '').trim() || null,
+        playbackMode: String(event.playbackMode || '').trim() || null,
+        driftMs: Number.isFinite(Number(event.driftMs)) ? Number(event.driftMs) : null,
         timestamp: Number(event.timestamp) || Date.now()
     };
     playbackTelemetry.push(normalizedEvent);
@@ -1195,6 +1199,7 @@ app.use('/videos/:videoPath(*)', (req, res, next) => {
 
                 const userAgent = req.get('User-Agent') || '';
                 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+                const isAppleMobile = /iPhone|iPad|iPod/i.test(userAgent);
 
                 console.log(`[MOBILE] Mobile detected: ${isMobile}`);
 
@@ -1218,6 +1223,10 @@ app.use('/videos/:videoPath(*)', (req, res, next) => {
                     res.setHeader('X-Accel-Buffering', 'no');
                 }
 
+                const movFlags = isAppleMobile
+                    ? '-movflags frag_keyframe+empty_moov'
+                    : '-movflags frag_keyframe+empty_moov+default_base_moof+frag_discont';
+
                 const ffmpegCommand = ffmpeg(videoFullPath)
                     .inputOptions([`-ss ${seekTime}`])
                     .videoCodec('libx264')
@@ -1225,7 +1234,7 @@ app.use('/videos/:videoPath(*)', (req, res, next) => {
                     .outputOptions([
                         '-preset ultrafast',
                         '-tune zerolatency',
-                        '-movflags frag_keyframe+empty_moov+default_base_moof+frag_discont',
+                        movFlags,
                         '-pix_fmt yuv420p',
                         '-frag_duration 2000000',
                         '-min_frag_duration 1000000',
@@ -1236,6 +1245,9 @@ app.use('/videos/:videoPath(*)', (req, res, next) => {
                             '-level 3.0',
                             '-maxrate 2M',
                             '-bufsize 4M'
+                        ] : []),
+                        ...(isAppleMobile ? [
+                            '-tag:v avc1'
                         ] : []),
                         ...(isCloudflare ? [
                             '-write_tmcd 0',
@@ -1363,8 +1375,8 @@ app.post('/api/rooms', (req, res) => {
         res.json({
             roomCode: sharedRoom.roomCode,
             videoFile: sharedRoom.videoFile,
-            roomUrl: `/player.html?room=${encodeURIComponent(sharedRoom.roomCode)}`,
-            shareUrl: `/player.html?room=${encodeURIComponent(sharedRoom.roomCode)}`,
+            roomUrl: `/player.html?video=${encodeURIComponent(sharedRoom.videoFile)}&room=${encodeURIComponent(sharedRoom.roomCode)}`,
+            shareUrl: `/player.html?video=${encodeURIComponent(sharedRoom.videoFile)}&room=${encodeURIComponent(sharedRoom.roomCode)}`,
             expiresInMs: ROOM_TTL_MS
         });
     } catch (error) {
@@ -1382,7 +1394,7 @@ app.get('/api/rooms/:roomCode', (req, res) => {
     res.json({
         roomCode: sharedRoom.roomCode,
         videoFile: sharedRoom.videoFile,
-        shareUrl: `/player.html?room=${encodeURIComponent(sharedRoom.roomCode)}`,
+        shareUrl: `/player.html?video=${encodeURIComponent(sharedRoom.videoFile)}&room=${encodeURIComponent(sharedRoom.roomCode)}`,
         expiresInMs: Math.max(0, ROOM_TTL_MS - (Date.now() - sharedRoom.createdAt))
     });
 });
@@ -1577,6 +1589,22 @@ app.post('/api/metadata-refresh', async (req, res) => {
     } catch (error) {
         console.error('[TMDB] Failed to refresh metadata:', error);
         res.status(500).json({ error: 'Could not refresh metadata' });
+    }
+});
+
+app.post('/api/progress/mark', async (req, res) => {
+    const requestedVideoFile = String(req.body?.videoFile || '').trim();
+    if (!requestedVideoFile) {
+        return res.status(400).json({ error: 'Video file is required' });
+    }
+
+    try {
+        const result = await markVideoProgress(requestedVideoFile, req.body?.watched);
+        res.json({ ok: true, ...result });
+    } catch (error) {
+        const statusCode = Number(error?.statusCode) || 500;
+        console.error('[PROGRESS] Failed to update video progress:', error);
+        res.status(statusCode).json({ error: error.message || 'Could not update video progress' });
     }
 });
 
@@ -3055,7 +3083,8 @@ function summarizeRoomDiagnostics(roomKey, metadata = {}) {
         clients: Object.entries(clients).map(([socketId, client]) => ({
             socketId,
             isReady: Boolean(client?.isReady),
-            lastReadyUpdate: client?.lastReadyUpdate || 0
+            lastReadyUpdate: client?.lastReadyUpdate || 0,
+            cameraEnabled: Boolean(client?.cameraEnabled)
         }))
     };
 }
@@ -3223,7 +3252,7 @@ io.on('connection', (socket) => {
             scheduleRoomStatePersist();
         }
         // Add client to the room state
-        roomStates[room].clients[socket.id] = { isReady: false, lastReadyUpdate: 0 };
+        roomStates[room].clients[socket.id] = { isReady: false, lastReadyUpdate: 0, cameraEnabled: false };
         const wasReconnect = roomSize > 0 && roomStates[room].lastPartnerDisconnectAt > 0 && (Date.now() - roomStates[room].lastPartnerDisconnectAt) < 15000;
 
         // Leader election
@@ -3249,7 +3278,10 @@ io.on('connection', (socket) => {
         }
         socket.emit('joined', {
             roomCode: socket.roomCode,
-            shareUrl: socket.roomCode ? `/player.html?room=${encodeURIComponent(socket.roomCode)}` : null
+            videoFile: socket.currentVideoFile,
+            shareUrl: socket.roomCode ? `/player.html?video=${encodeURIComponent(socket.currentVideoFile)}&room=${encodeURIComponent(socket.roomCode)}` : null,
+            participantCount: roomSize + 1,
+            isLeader: roomLeaders[room] === socket.id
         });
         console.log(`A user joined room: ${room}`);
     });
@@ -3382,6 +3414,12 @@ io.on('connection', (socket) => {
     // --- Event Handlers for Video Sync ---
     socket.on('getProgress', async ({ videoFile }) => {
         try {
+            const room = socket.currentRoom;
+            const participantCount = room ? (io.sockets.adapter.rooms.get(room)?.size || 0) : 0;
+            if (room && participantCount > 1) {
+                socket.emit('loadProgress', { time: 0, ignoredForSharedRoom: true });
+                return;
+            }
             const progress = await readProgressFile();
             const resolvedMedia = resolveMediaPath(videosDirectory, videoFile);
             if (!resolvedMedia) {
@@ -3471,6 +3509,82 @@ io.on('connection', (socket) => {
                 syncSnapshot: getRoomSyncSnapshot(room)
             });
         }
+    });
+
+    socket.on('requestWebcamStateSync', () => {
+        const room = socket.currentRoom;
+        if (!room || !roomStates[room]) {
+            return;
+        }
+
+        const clientsInfo = Object.entries(roomStates[room].clients).map(([id, client]) => ({
+            id,
+            cameraEnabled: Boolean(client?.cameraEnabled)
+        }));
+        socket.emit('webcamStateSync', { clients: clientsInfo });
+    });
+
+    socket.on('webcamStateUpdate', ({ enabled } = {}) => {
+        const room = socket.currentRoom;
+        if (!room || !roomStates[room] || !roomStates[room].clients[socket.id]) {
+            return;
+        }
+
+        roomStates[room].clients[socket.id].cameraEnabled = Boolean(enabled);
+        socket.to(room).emit('partnerCameraState', {
+            socketId: socket.id,
+            cameraEnabled: Boolean(enabled),
+            timestamp: Date.now()
+        });
+    });
+
+    socket.on('webrtcOffer', ({ targetSocketId, description, reason } = {}) => {
+        if (!socket.currentRoom || !targetSocketId || !description) {
+            return;
+        }
+        io.to(targetSocketId).emit('webrtcOffer', {
+            socketId: socket.id,
+            description,
+            reason,
+            timestamp: Date.now()
+        });
+    });
+
+    socket.on('webrtcAnswer', ({ targetSocketId, description } = {}) => {
+        if (!socket.currentRoom || !targetSocketId || !description) {
+            return;
+        }
+        io.to(targetSocketId).emit('webrtcAnswer', {
+            socketId: socket.id,
+            description,
+            timestamp: Date.now()
+        });
+    });
+
+    socket.on('webrtcIceCandidate', ({ targetSocketId, candidate } = {}) => {
+        if (!socket.currentRoom || !targetSocketId || !candidate) {
+            return;
+        }
+        io.to(targetSocketId).emit('webrtcIceCandidate', {
+            socketId: socket.id,
+            candidate,
+            timestamp: Date.now()
+        });
+    });
+
+    socket.on('webrtcHangup', ({ targetSocketId } = {}) => {
+        if (!socket.currentRoom) {
+            return;
+        }
+        const payload = {
+            socketId: socket.id,
+            timestamp: Date.now()
+        };
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('webrtcHangup', payload);
+            return;
+        }
+        socket.to(socket.currentRoom).emit('webrtcHangup', payload);
     });
 
     // This generic handler broadcasts events to all clients in the room (including sender).
@@ -3602,6 +3716,7 @@ io.on('connection', (socket) => {
     });
 
     createBroadcastToAllHandler('pause'); // Pause can still be immediate and for everyone
+    createBroadcastToOthersHandler('returnToLobby');
     createBroadcastToOthersHandler('seek');
 
     socket.on('subtitleOffsetUpdate', (data = {}) => {
@@ -3669,14 +3784,8 @@ io.on('connection', (socket) => {
 
     socket.on('markVideo', async ({ videoFile, watched }) => {
         try {
-            const resolvedMedia = getResolvedMediaOrThrow(videoFile);
-            let newTime = 0;
-            if (watched) {
-                    const durationInSeconds = await getCachedVideoDuration(resolvedMedia.fullPath);
-                newTime = durationInSeconds;
-            }
-            await saveProgress(resolvedMedia.relativePath, newTime);
-            socket.emit('videoMarked', { videoFile: resolvedMedia.relativePath, watched, time: newTime }); // Acknowledge with new time
+            const result = await markVideoProgress(videoFile, watched);
+            socket.emit('videoMarked', result); // Acknowledge with new time
         } catch (error) {
             console.error(`Error marking video ${videoFile}:`, error);
         }
@@ -3777,6 +3886,7 @@ io.on('connection', (socket) => {
         if (currentRoom) {
             // Check if the disconnecting user was the leader
             const wasLeader = roomLeaders[currentRoom] === socket.id;
+            const hadCameraEnabled = Boolean(roomStates[currentRoom]?.clients?.[socket.id]?.cameraEnabled);
 
             // Remove the disconnected client from our custom state management
             if (roomStates[currentRoom] && roomStates[currentRoom].clients[socket.id]) {
@@ -3812,6 +3922,17 @@ io.on('connection', (socket) => {
             
             // If there are still clients in the room, notify them
             if (remainingClients.length > 0) {
+                if (hadCameraEnabled) {
+                    socket.to(currentRoom).emit('partnerCameraState', {
+                        socketId: socket.id,
+                        cameraEnabled: false,
+                        timestamp: Date.now()
+                    });
+                    socket.to(currentRoom).emit('webrtcHangup', {
+                        socketId: socket.id,
+                        timestamp: Date.now()
+                    });
+                }
                 if (roomStates[currentRoom]) {
                     roomStates[currentRoom].lastPartnerDisconnectAt = Date.now();
                     scheduleRoomStatePersist();
@@ -3866,6 +3987,20 @@ async function saveProgress(videoFile, time) {
     } catch (error) {
         console.error(`Failed to save progress for ${videoFile}:`, error);
     }
+}
+
+async function markVideoProgress(videoFile, watched) {
+    const resolvedMedia = getResolvedMediaOrThrow(videoFile);
+    let newTime = 0;
+    if (Boolean(watched)) {
+        newTime = await getCachedVideoDuration(resolvedMedia.fullPath);
+    }
+    await saveProgress(resolvedMedia.relativePath, newTime);
+    return {
+        videoFile: resolvedMedia.relativePath,
+        watched: Boolean(watched),
+        time: newTime
+    };
 }
 
 async function collectTmdbHintFileNames(itemRelativePath, limit = 6) {

@@ -96,10 +96,17 @@ function renderRoomCard(room) {
 function renderTelemetryEvent(event) {
     const item = document.createElement('li');
     item.className = 'telemetry-item';
+    const meta = [
+        event.roomCode || 'no-room',
+        event.videoFile || 'n/a',
+        event.source ? `source: ${event.source}` : null,
+        event.playbackMode ? `mode: ${event.playbackMode}` : null,
+        event.seekId ? `seek: ${event.seekId}` : null,
+        Number.isFinite(event.driftMs) ? `drift: ${event.driftMs}ms` : null
+    ].filter(Boolean).map(value => `<span>${value}</span>`).join('');
     item.innerHTML = `
         <strong>${event.type}</strong>
-        <span>${event.roomCode || 'no-room'}</span>
-        <span>${event.videoFile || 'n/a'}</span>
+        ${meta}
         <time>${fmtTime(event.timestamp)}</time>
         ${event.detail ? `<p>${event.detail}</p>` : ''}
     `;
@@ -112,6 +119,10 @@ function telemetryKey(event) {
         event.type,
         event.roomCode,
         event.videoFile,
+        event.seekId,
+        event.source,
+        event.playbackMode,
+        event.driftMs,
         event.detail
     ].map((part) => String(part ?? '')).join('|');
 }
