@@ -954,6 +954,30 @@ test('mobile seek recovery avoids snapshot storms after waiting events', { timeo
         }, 60);
     });
 
+    await delay(220);
+
+    const midSeekState = await Promise.all([
+        leaderPage.evaluate(() => ({
+            paused: document.getElementById('video-player').paused,
+            time: document.getElementById('video-player').currentTime
+        })),
+        followerPage.evaluate(() => ({
+            paused: document.getElementById('video-player').paused,
+            time: document.getElementById('video-player').currentTime
+        }))
+    ]);
+
+    assert.equal(
+        midSeekState[0].paused,
+        true,
+        `Leader should briefly hold playback during mobile seek settle.\n${JSON.stringify(midSeekState)}\n${serverLogs}`
+    );
+    assert.equal(
+        midSeekState[1].paused,
+        true,
+        `Follower should briefly hold playback during mobile seek settle.\n${JSON.stringify(midSeekState)}\n${serverLogs}`
+    );
+
     await delay(2600);
 
     const finalTelemetry = await getTelemetrySummary(port);
