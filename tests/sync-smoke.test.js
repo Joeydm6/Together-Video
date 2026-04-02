@@ -440,7 +440,9 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
         document.getElementById('video-player').currentTime = 1;
     });
 
-    const bootstrapCountBeforeManualResync = (await getTelemetrySummary(port)).counts?.bootstrap || 0;
+    const telemetryBeforeManualResync = await getTelemetrySummary(port);
+    const bootstrapCountBeforeManualResync = telemetryBeforeManualResync.counts?.bootstrap || 0;
+    const snapshotCountBeforeManualResync = telemetryBeforeManualResync.counts?.snapshot || 0;
     await pageTwo.evaluate(() => {
         document.getElementById('video-wrapper').classList.add('ui-visible');
     });
@@ -458,11 +460,17 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
         Math.abs(timesAfterManualResync[0] - timesAfterManualResync[1]) < 1.25,
         `Players drifted too far after manual resync: ${timesAfterManualResync.join(' vs ')}\n${serverLogs}`
     );
-    const bootstrapCountAfterManualResync = (await getTelemetrySummary(port)).counts?.bootstrap || 0;
+    const telemetryAfterManualResync = await getTelemetrySummary(port);
+    const bootstrapCountAfterManualResync = telemetryAfterManualResync.counts?.bootstrap || 0;
+    const snapshotCountAfterManualResync = telemetryAfterManualResync.counts?.snapshot || 0;
     assert.equal(
         bootstrapCountAfterManualResync - bootstrapCountBeforeManualResync,
         0,
         `Manual resync unexpectedly fell back to a server bootstrap snapshot.\n${serverLogs}`
+    );
+    assert.ok(
+        (snapshotCountAfterManualResync - snapshotCountBeforeManualResync) >= 1,
+        `Manual resync did not complete with a fresh sync snapshot.\n${serverLogs}`
     );
 
     await pageOne.evaluate(() => {
