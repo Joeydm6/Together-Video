@@ -3240,6 +3240,52 @@ function emitBootstrapSnapshot(socket, room) {
     socket.emit('roomSyncBootstrap', snapshot);
 }
 
+function pruneStaleRoomMembers(room, expectedVideoFile) {
+    if (!room || !expectedVideoFile) {
+        return 0;
+    }
+
+    const roomMembers = io.sockets.adapter.rooms.get(room);
+    if (!roomMembers || roomMembers.size === 0) {
+        return 0;
+    }
+
+    let removed = 0;
+    for (const socketId of [...roomMembers]) {
+        const memberSocket = io.sockets.sockets.get(socketId);
+        if (!memberSocket || memberSocket.currentVideoFile === expectedVideoFile) {
+            continue;
+        }
+
+        clearPendingSnapshotFallback(socketId);
+        memberSocket.leave(room);
+        memberSocket.currentRoom = null;
+
+        if (roomStates[room]?.clients?.[socketId]) {
+            delete roomStates[room].clients[socketId];
+        }
+
+        if (roomLeaders[room] === socketId) {
+            delete roomLeaders[room];
+        }
+
+        removed += 1;
+    }
+
+    if (removed > 0) {
+        const remainingClients = roomStates[room] ? Object.keys(roomStates[room].clients) : [];
+        if (remainingClients.length <= 1) {
+            clearPendingAction(room);
+        }
+        if (!roomLeaders[room] && remainingClients.length > 0) {
+            roomLeaders[room] = remainingClients[0];
+        }
+        scheduleRoomStatePersist();
+    }
+
+    return removed;
+}
+
 io.on('connection', (socket) => {
     console.log(`A user connected: ${socket.id}`);
 
@@ -3282,6 +3328,9 @@ io.on('connection', (socket) => {
         socket.currentVideoFile = resolvedMedia.relativePath;
         socket.roomCode = sharedRoom?.roomCode || null;
         const room = sharedRoom?.roomKey || getRoomFromVideoFile(resolvedMedia.relativePath);
+        if (sharedRoom) {
+            pruneStaleRoomMembers(room, resolvedMedia.relativePath);
+        }
         const roomSize = io.sockets.adapter.rooms.get(room)?.size || 0;
 
         if (roomSize >= 2) {
