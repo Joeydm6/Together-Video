@@ -531,6 +531,150 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
     }, sharedRoom.syncSnapshot.seekId);
 });
 
+test('shared room episode handoff keeps both viewers on the next episode', { timeout: 120_000 }, async (t) => {
+    assert.ok(fs.existsSync(ffmpegPath), `FFmpeg fixture generator not found at ${ffmpegPath}`);
+    assert.ok(fs.existsSync(chromePath), `Chrome not found at ${chromePath}`);
+
+    const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'togethervideo-handoff-'));
+    const mediaRoot = path.join(tempRoot, 'media');
+    const cacheRoot = path.join(tempRoot, 'cache');
+    const progressPath = path.join(tempRoot, 'progress.json');
+    const seasonDir = path.join(mediaRoot, 'Series', 'Handoff Show', 'Season 1');
+    const episodeOne = path.join(seasonDir, 'Handoff Show S01E01.mp4');
+    const episodeTwo = path.join(seasonDir, 'Handoff Show S01E02.mp4');
+
+    await fsp.mkdir(seasonDir, { recursive: true });
+    await fsp.mkdir(cacheRoot, { recursive: true });
+    await fsp.writeFile(progressPath, '{}');
+    createFixtureVideo(episodeOne);
+    createFixtureVideo(episodeTwo);
+
+    const port = await getFreePort();
+    const serverProcess = spawn(process.execPath, ['server.js'], {
+        cwd: repoRoot,
+        env: {
+            ...process.env,
+            PORT: String(port),
+            VIDEOS_DIRECTORY: mediaRoot,
+            CACHE_DIRECTORY: cacheRoot,
+            PROGRESS_FILE_PATH: progressPath,
+            TMDB_API_KEY: ''
+        },
+        stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let serverLogs = '';
+    serverProcess.stdout.on('data', chunk => {
+        serverLogs += chunk.toString();
+    });
+    serverProcess.stderr.on('data', chunk => {
+        serverLogs += chunk.toString();
+    });
+
+    const cleanup = async () => {
+        if (!serverProcess.killed) {
+            serverProcess.kill('SIGTERM');
+            await delay(500);
+            if (!serverProcess.killed) {
+                serverProcess.kill('SIGKILL');
+            }
+        }
+        await fsp.rm(tempRoot, { recursive: true, force: true });
+    };
+
+    t.after(cleanup);
+
+    await waitForServer(`http://127.0.0.1:${port}/`);
+
+    const browser = await chromium.launch({
+        executablePath: chromePath,
+        headless: true
+    });
+
+    t.after(async () => {
+        await browser.close();
+    });
+
+    const pageOne = await browser.newPage();
+    const pageTwo = await browser.newPage();
+
+    await installMediaMock(pageOne);
+    await installMediaMock(pageTwo);
+
+    const firstEpisodePath = 'Series/Handoff Show/Season 1/Handoff Show S01E01.mp4';
+    const secondEpisodePath = 'Series/Handoff Show/Season 1/Handoff Show S01E02.mp4';
+    const playerUrl = `http://127.0.0.1:${port}/player.html?video=${encodeURIComponent(firstEpisodePath)}`;
+
+    await pageOne.goto(playerUrl, { waitUntil: 'domcontentloaded' });
+    await pageOne.waitForFunction(() => new URLSearchParams(window.location.search).get('room'));
+
+    const sharedRoomUrl = await pageOne.evaluate(() => window.location.href);
+    await pageTwo.goto(sharedRoomUrl, { waitUntil: 'domcontentloaded' });
+
+    await pageOne.locator('#join-button').click();
+    await pageTwo.locator('#join-button').click();
+    await pageOne.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Together'));
+    await pageOne.locator('#join-button').click();
+
+    await pageOne.waitForFunction(() => document.getElementById('video-player').paused === false);
+    await pageTwo.waitForFunction(() => document.getElementById('video-player').paused === false);
+
+    const roomCode = await pageOne.evaluate(() => new URL(window.location.href).searchParams.get('room'));
+
+    await pageOne.evaluate(() => {
+        document.getElementById('video-player').dispatchEvent(new Event('ended'));
+    });
+
+    await pageOne.waitForFunction(() => document.getElementById('next-episode-countdown').style.display === 'flex');
+    await pageTwo.waitForFunction(() => document.getElementById('next-episode-countdown').style.display === 'flex');
+    await pageOne.locator('#next-episode-play-now').click();
+
+    await pageOne.waitForFunction((expectedVideo) => new URL(window.location.href).searchParams.get('video') === expectedVideo, secondEpisodePath);
+    await pageTwo.waitForFunction((expectedVideo) => new URL(window.location.href).searchParams.get('video') === expectedVideo, secondEpisodePath);
+
+    await pageOne.waitForFunction(() => document.body.textContent.includes('Episode 2'));
+    await pageTwo.waitForFunction(() => document.body.textContent.includes('Episode 2'));
+    await pageOne.waitForFunction(() => document.getElementById('video-player').paused === false);
+    await pageTwo.waitForFunction(() => document.getElementById('video-player').paused === false);
+    await pageOne.waitForFunction(() => document.getElementById('join-overlay').style.display === 'none');
+    await pageTwo.waitForFunction(() => document.getElementById('join-overlay').style.display === 'none');
+
+    const roomResponse = await fetch(`http://127.0.0.1:${port}/api/rooms/${encodeURIComponent(roomCode)}`);
+    assert.equal(roomResponse.ok, true, `Room metadata lookup failed after episode handoff.\n${serverLogs}`);
+    const roomState = await roomResponse.json();
+    assert.equal(
+        roomState.videoFile,
+        secondEpisodePath,
+        `Shared room metadata did not move to the next episode.\n${JSON.stringify(roomState, null, 2)}\n${serverLogs}`
+    );
+
+    const finalState = await Promise.all([
+        pageOne.evaluate(() => ({
+            title: document.getElementById('video-title').textContent,
+            paused: document.getElementById('video-player').paused,
+            time: document.getElementById('video-player').currentTime,
+            body: document.body.textContent
+        })),
+        pageTwo.evaluate(() => ({
+            title: document.getElementById('video-title').textContent,
+            paused: document.getElementById('video-player').paused,
+            time: document.getElementById('video-player').currentTime,
+            body: document.body.textContent
+        }))
+    ]);
+
+    assert.ok(finalState[0].title.includes('Episode 2'), `Page one never reached episode 2.\n${JSON.stringify(finalState[0], null, 2)}\n${serverLogs}`);
+    assert.ok(finalState[1].title.includes('Episode 2'), `Page two never reached episode 2.\n${JSON.stringify(finalState[1], null, 2)}\n${serverLogs}`);
+    assert.equal(finalState[0].paused, false, `Page one did not resume after the handoff.\n${serverLogs}`);
+    assert.equal(finalState[1].paused, false, `Page two did not resume after the handoff.\n${serverLogs}`);
+    assert.ok(!finalState[0].body.includes('Room not found'), `Page one hit a room lookup failure during handoff.\n${serverLogs}`);
+    assert.ok(!finalState[1].body.includes('Room not found'), `Page two hit a room lookup failure during handoff.\n${serverLogs}`);
+    assert.ok(
+        Math.abs(finalState[0].time - finalState[1].time) < 1.5,
+        `Players drifted too far after episode handoff: ${JSON.stringify(finalState)}\n${serverLogs}`
+    );
+});
+
 test('players recover from reconnects and leader handoff', { timeout: 150_000 }, async (t) => {
     assert.ok(fs.existsSync(ffmpegPath), `FFmpeg fixture generator not found at ${ffmpegPath}`);
     assert.ok(fs.existsSync(chromePath), `Chrome not found at ${chromePath}`);

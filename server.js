@@ -3068,6 +3068,49 @@ function getSharedRoom(roomCode) {
     return room;
 }
 
+function getSharedRoomByKey(roomKey) {
+    if (!roomKey) {
+        return null;
+    }
+
+    for (const room of sharedRooms.values()) {
+        if (room.roomKey === roomKey) {
+            return room;
+        }
+    }
+
+    return null;
+}
+
+function syncSharedRoomVideo(roomKey, videoFile) {
+    if (!roomKey || !videoFile) {
+        return null;
+    }
+
+    const sharedRoom = getSharedRoomByKey(roomKey);
+    if (!sharedRoom) {
+        return null;
+    }
+
+    sharedRoom.videoFile = videoFile;
+    sharedRoom.lastUsedAt = Date.now();
+
+    clearPendingAction(roomKey);
+    updateRoomSyncSnapshot(roomKey, {
+        videoFile,
+        time: 0,
+        paused: true,
+        seekId: null,
+        subtitleUrl: null,
+        subtitleOffsetMs: 0,
+        audioTrackIndex: null,
+        sourceSocketId: roomLeaders[roomKey] || null
+    });
+
+    scheduleRoomStatePersist();
+    return sharedRoom;
+}
+
 function summarizeRoomDiagnostics(roomKey, metadata = {}) {
     const state = roomStates[roomKey];
     const clients = state?.clients || {};
@@ -3368,6 +3411,7 @@ io.on('connection', (socket) => {
         if (socket.currentRoom) {
             const prevVideo = await findPreviousVideo(videoFile);
             if (prevVideo) {
+                syncSharedRoomVideo(socket.currentRoom, prevVideo);
                 io.to(socket.currentRoom).emit('loadPreviousVideo', { video: prevVideo });
             }
         }
@@ -3386,6 +3430,7 @@ io.on('connection', (socket) => {
         if (socket.currentRoom) {
             const nextVideo = await findNextVideo(videoFile);
             if (nextVideo) {
+                syncSharedRoomVideo(socket.currentRoom, nextVideo);
                 io.to(socket.currentRoom).emit('loadNextVideo', { video: nextVideo });
             }
         }
@@ -3425,6 +3470,7 @@ io.on('connection', (socket) => {
         }
 
         if (socket.currentRoom) {
+            syncSharedRoomVideo(socket.currentRoom, video);
             io.to(socket.currentRoom).emit('loadNextVideo', { video });
         } else {
             socket.emit('loadNextVideo', { video });
