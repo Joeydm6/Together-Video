@@ -532,21 +532,22 @@
         
         #combined-settings-panel {
             display: none;
-            position: fixed;
-            inset: 0;
-            padding: 1.25rem;
-            overflow: hidden;
-            background: rgba(2, 2, 4, 0.92);
+            position: absolute;
+            left: 50%;
+            bottom: calc(2rem + 4.85rem);
+            width: min(34rem, calc(100% - 2rem));
+            padding: 0;
+            overflow: visible;
+            background: none;
+            transform: translateX(-50%);
             opacity: 0;
             visibility: hidden;
             pointer-events: none;
-            z-index: 60;
+            z-index: 32;
             transition: opacity var(--motion-medium) ease, visibility var(--motion-medium) ease;
         }
         #combined-settings-panel.is-open {
-            display: flex !important;
-            align-items: center;
-            justify-content: center;
+            display: block !important;
             opacity: 1;
             visibility: visible;
             pointer-events: auto;
@@ -563,18 +564,18 @@
             position: relative;
             display: grid;
             grid-template-rows: auto 1fr;
-            width: min(44rem, calc(100vw - 3rem));
-            height: min(42rem, calc(100dvh - 3rem));
-            max-height: calc(100dvh - 3rem);
+            width: 100%;
+            height: auto;
+            max-height: min(35rem, calc(100dvh - 8rem));
             margin: 0;
             overflow: hidden;
-            border-radius: 1.6rem;
+            border-radius: 1.3rem;
             border: 1px solid rgba(255, 255, 255, 0.08);
             background:
                 linear-gradient(180deg, rgba(8, 8, 10, 0.98), rgba(3, 3, 5, 0.97)),
                 radial-gradient(circle at top left, rgba(255, 193, 204, 0.12), transparent 34%);
-            box-shadow: 0 32px 60px rgba(0, 0, 0, 0.42);
-            transform: translateY(18px) scale(0.985);
+            box-shadow: 0 20px 36px rgba(0, 0, 0, 0.34);
+            transform: translateY(12px) scale(0.985);
             transition: transform var(--motion-medium) var(--ease-standard), box-shadow var(--motion-medium) ease;
         }
         #combined-settings-panel.is-open .settings-panel-shell {
@@ -1551,6 +1552,7 @@
             border-radius: 0;
             padding: max(1rem, env(safe-area-inset-top)) 1rem calc(1.5rem + env(safe-area-inset-bottom));
             z-index: 70;
+            transform: none;
         }
         body.pseudo-fullscreen {
             overflow: hidden;
@@ -2456,6 +2458,7 @@
                 width: auto;
                 max-width: none;
                 max-height: min(68vh, 34rem);
+                transform: none;
             }
             #mobile-player-shell {
                 display: flex;
