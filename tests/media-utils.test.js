@@ -72,6 +72,18 @@ test('findExternalSubtitleMatches finds case-variant subtitle files', () => {
     ]);
 });
 
+test('findExternalSubtitleMatches ignores unsupported .sub files', () => {
+    const matches = findExternalSubtitleMatches(
+        'Series/Mobland/Season 1/Mobland S01e01 Stick Or Twist 1080P Amzn Web-Dl Ddp5 1 H 264-Flux.mp4',
+        [
+            'MobLand S01E01 Stick or Twist 1080p AMZN WEB-DL DDP5 1 H 264-FLUX.sub',
+            'MobLand S01E01 Stick or Twist 1080p AMZN WEB-DL DDP5 1 H 264-FLUX.idx'
+        ]
+    );
+
+    assert.deepEqual(matches, []);
+});
+
 test('pickBestTmdbSearchResult prefers the intended Avatar series over The King\'s Avatar', () => {
     const result = pickBestTmdbSearchResult([
         {

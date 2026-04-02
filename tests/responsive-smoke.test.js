@@ -263,6 +263,7 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
     const episodeTwo = path.join(seasonDir, 'Pocket Show S01E02 Another Long Episode Name.mp4');
     const secondShowEpisode = path.join(secondSeasonDir, 'Second Pocket Show S01E01 Another Episode For Grid Coverage.mp4');
     const englishSubtitle = path.join(seasonDir, 'Pocket Show S01E01 A Long Episode Name For Small Screens.en.srt');
+    const assSubtitle = path.join(secondSeasonDir, 'Second Pocket Show S01E01 Another Episode For Grid Coverage.en.ass');
 
     await fsp.mkdir(seasonDir, { recursive: true });
     await fsp.mkdir(secondSeasonDir, { recursive: true });
@@ -274,6 +275,10 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
     await fsp.writeFile(
         englishSubtitle,
         '1\n00:00:00,000 --> 00:00:10,000\nResponsive subtitle check.\n'
+    );
+    await fsp.writeFile(
+        assSubtitle,
+        '[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,ASS subtitle check.\\NSecond line.\n'
     );
 
     const port = await getFreePort();
@@ -499,6 +504,15 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
     await mobilePage.locator('#fullscreen-back-button').click();
     await mobilePage.waitForFunction(() => document.getElementById('join-overlay').style.display !== 'none');
     await mobilePage.waitForFunction(() => !document.body.classList.contains('fullscreen-active'));
+
+    const assVideoParam = encodeURIComponent('Series/Second Pocket Show/Season 1/Second Pocket Show S01E01 Another Episode For Grid Coverage.mp4');
+    await mobilePage.goto(`http://127.0.0.1:${port}/player.html?video=${assVideoParam}`, { waitUntil: 'domcontentloaded' });
+    await mobilePage.locator('#join-button').click();
+    await mobilePage.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Watching'));
+    await mobilePage.locator('#join-button').click();
+    await mobilePage.waitForFunction(() => document.getElementById('join-overlay').style.display === 'none');
+    await mobilePage.waitForFunction(() => document.getElementById('subtitle-container').textContent.includes('ASS subtitle check.'));
+    await mobilePage.waitForFunction(() => document.getElementById('subtitle-container').innerHTML.includes('<br>'));
 
     await desktopPage.goto(`http://127.0.0.1:${port}/player.html?video=${videoParam}`, { waitUntil: 'domcontentloaded' });
     await desktopPage.waitForFunction(() => document.getElementById('join-button').getBoundingClientRect().height > 0);
