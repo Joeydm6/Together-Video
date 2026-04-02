@@ -157,7 +157,9 @@ function matchesFilter(room, filterText) {
     if (!filterText) {
         return true;
     }
+    const snapshot = room.syncSnapshot || {};
     return [room.roomCode, room.roomKey, room.videoFile, room.leaderSocketId]
+        .concat([snapshot.seekId, snapshot.sourceSocketId])
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(filterText));
 }
@@ -166,7 +168,7 @@ function matchesTelemetryFilter(event, filterText) {
     if (!filterText) {
         return true;
     }
-    return [event.type, event.roomCode, event.videoFile, event.detail]
+    return [event.type, event.roomCode, event.videoFile, event.detail, event.seekId, event.source, event.playbackMode, event.driftMs]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(filterText));
 }

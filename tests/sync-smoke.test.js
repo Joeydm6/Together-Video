@@ -505,6 +505,15 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
     const sharedRoom = diagnosticsRooms.sharedRooms.find(room => room.roomCode === roomCode);
     assert.ok(sharedRoom, `Expected diagnostics payload for room ${roomCode}.\n${serverLogs}`);
     assert.ok(sharedRoom.syncSnapshot?.seekId, `Expected room snapshot to retain the latest seekId.\n${JSON.stringify(diagnosticsRooms, null, 2)}\n${serverLogs}`);
+    await diagnosticsPage.fill('#diagnostics-filter', sharedRoom.syncSnapshot.seekId);
+    await diagnosticsPage.waitForFunction((seekId) => {
+        const roomCards = Array.from(document.querySelectorAll('#shared-rooms .diag-card'));
+        const telemetryItems = Array.from(document.querySelectorAll('#recent-telemetry .telemetry-item'));
+        return roomCards.length >= 1
+            && roomCards.every(card => card.textContent.includes(seekId))
+            && telemetryItems.length >= 1
+            && telemetryItems.every(item => item.textContent.includes(seekId));
+    }, sharedRoom.syncSnapshot.seekId);
 });
 
 test('players recover from reconnects and leader handoff', { timeout: 150_000 }, async (t) => {
