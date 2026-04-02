@@ -624,3 +624,124 @@ Deze punten zijn geen losse roadmapfeatures, maar directe kwaliteitsissues die m
   - offsetwijzigingen moeten meteen de actieve cue opnieuw renderen, ook als de video gepauzeerd is
   - standaard stapgrootte verhogen naar een bruikbare waarde voor echte releases
   - offset-sync tussen 2 gebruikers mee blijven testen
+
+## Reviewronde April 2026
+
+Concrete verbeterpunten na een code-review van de huidige video tool:
+
+### P0
+
+- Mobiele seek-flow stabiliseren.
+  Waarom:
+  - een lokale seek stuurt nu direct een `seek`, daarna vaak nog een extra `requestSyncSnapshot`, en bij de leader volgt ook nog een `syncSnapshot` als stabilisatie
+  - op mobiel veroorzaakt dat meerdere snelle correcties achter elkaar, zichtbaar als flicker of een seek die even terugschiet
+  Aanpak:
+  - voeg seek-transacties toe met een `seekId` en een korte settle window
+  - stuur niet standaard een volledige resync direct na elke seek
+  - laat alleen een tweede correctie gebeuren als drift na de settle window nog echt te groot is
+
+- Buffer-events na seek minder agressief laten resyncen.
+  Waarom:
+  - `waiting` en `stalled` zijn op mobiel of in data-saver mode normaal vlak na scrubben
+  - die events triggeren nu extra sync-correcties terwijl de speler vaak nog gewoon bezig is met herstellen
+  Aanpak:
+  - introduceer een cooldown van bijvoorbeeld 1.5 tot 2 seconden na seek
+  - gebruik aparte thresholds voor `post-seek`, `heartbeat` en `manual resync`
+
+- Fullscreen/landscape-flow minder kwetsbaar maken tijdens mobiel scrubben.
+  Waarom:
+  - mobiele browsers kunnen tijdens seeken of UI-transities tijdelijk fullscreen-status wijzigen
+  - de huidige flow kan dat interpreteren als een echte exit en terugvallen naar de join/start-overlay
+  Aanpak:
+  - behandel fullscreen-exits kort na seek of browser UI-transities eerst als tijdelijk
+  - pas pas terug naar lobby als zowel fullscreen weg is als playback echt gestopt is
+
+### P1
+
+- Sync-model duidelijker leader-authoritative maken.
+  Waarom:
+  - nu lopen `seek`, `syncTime`, `syncSnapshot`, `readyState` en bootstrap-herstel deels door elkaar
+  - dat maakt timingbugs moeilijker te debuggen
+  Aanpak:
+  - definieer per actie een eigenaar:
+    `leader heartbeat`, `leader seek commit`, `manual resync`, `bootstrap`
+  - voeg correlation ids toe aan socket-events
+
+- Meer gerichte mobile sync smoke-tests toevoegen.
+  Waarom:
+  - bestaande tests dekken veel UI af, maar nog niet het echte probleemgeval: seeken op telefoon met tweede device in dezelfde sessie
+  Aanpak:
+  - voeg tests toe voor:
+    - twee mobiele clients
+    - seek tijdens fullscreen/pseudo-fullscreen
+    - seek in `data-saver` mode
+    - seek gevolgd door `waiting/stalled`
+
+- `player.js` verder opdelen.
+  Waarom:
+  - de file combineert sync, fullscreen, subtitles, media session, lobby, diagnostics en UI-state
+  - regressies rond seek en mobiel gedrag zijn daardoor lastig geïsoleerd op te lossen
+  Aanpak:
+  - splits minimaal in:
+    - `sync-session`
+    - `mobile-viewing`
+    - `media-source`
+    - `subtitle-state`
+    - `player-ui`
+
+- Diagnostics uitbreiden met een seek-timeline.
+  Waarom:
+  - voor dit type bug wil je direct zien:
+    `local seek -> remote seek -> waiting -> snapshot -> heartbeat -> fullscreenchange`
+  Aanpak:
+  - log per seek:
+    - `seekId`
+    - bronapparaat
+    - playback mode
+    - drift voor/na correctie
+    - aantal extra snapshots
+
+### P2
+
+- Server-state compacter en explicieter modelleren.
+  Waarom:
+  - `roomStates`, `roomLeaders`, `sharedRooms` en pending actions werken, maar de room lifecycle zit verspreid
+  Aanpak:
+  - maak een centrale room/session helper met vaste methodes voor:
+    - join
+    - leader handoff
+    - snapshot update
+    - pending action cleanup
+
+- Zoek/homepage en player meer dezelfde producttaal laten spreken.
+  Waarom:
+  - de app voelt functioneel sterk, maar de overgang van library naar sessieflow is nog best technisch
+  Aanpak:
+  - maak terminology consistenter:
+    - room
+    - partner
+    - get ready
+    - start together
+  - laat diagnostics/support-acties beter aansluiten op wat een gewone gebruiker ziet
+
+### Analyse huidig issue: flicker bij doorspoelen op telefoon
+
+Waarschijnlijke hoofdoorzaak in de huidige flow:
+
+1. Een device doet lokaal een seek.
+2. De player stuurt direct een `seek` naar de andere client.
+3. De seeker plant daarna vaak ook nog een extra `requestSyncSnapshot` in.
+4. De leader plant bovenop de seek nog een stabiliserende `syncSnapshot`.
+5. Als mobiel tijdens dat moment `waiting` of `stalled` vuurt, komt daar nog een extra recovery-sync bovenop.
+
+Gevolg:
+
+- hetzelfde seek-moment kan 2 tot 4 correcties na elkaar veroorzaken
+- op mobiel zie je dat als flicker, korte terug/sprong of een seek die niet "blijft staan"
+
+Aanbevolen fix-volgorde:
+
+1. Extra follower `requestSyncSnapshot` na seek tijdelijk uitschakelen of alleen na mislukte settle.
+2. `waiting/stalled` negeren binnen een korte post-seek cooldown.
+3. `syncSnapshot` threshold rond seek minder streng maken dan de huidige ultrakleine correctie.
+4. Daarna pas opnieuw mobiele sync-tests draaien met twee clients.

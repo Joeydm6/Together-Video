@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { setTimeout: delay } = require('node:timers/promises');
-const { chromium } = require('playwright');
+const { chromium, devices } = require('playwright');
 
 const repoRoot = path.join(__dirname, '..');
 const ffmpegPath = path.join(repoRoot, 'FFMPEG', 'bin', 'ffmpeg.exe');
@@ -62,6 +62,12 @@ async function waitForServer(url, timeoutMs = 20_000) {
     }
 
     throw new Error(`Server did not become ready within ${timeoutMs}ms`);
+}
+
+async function getTelemetrySummary(port) {
+    const response = await fetch(`http://127.0.0.1:${port}/api/telemetry/summary`);
+    assert.equal(response.ok, true, `Telemetry summary endpoint failed with ${response.status}`);
+    return response.json();
 }
 
 function installMediaMock(page) {
@@ -317,15 +323,31 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
 
     await pageTwo.goto(sharedRoomUrl, { waitUntil: 'domcontentloaded' });
 
-    await pageOne.locator('#join-button').click();
+    await pageOne.evaluate(() => document.getElementById('join-button').click());
     await pageTwo.locator('#join-button').click();
+    await pageOne.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Together'));
+    await pageTwo.waitForFunction(() => document.getElementById('join-button').textContent.includes('Waiting for Start'));
+
+    await pageTwo.evaluate(() => {
+        const video = document.getElementById('video-player');
+        Object.defineProperty(video, 'buffered', {
+            configurable: true,
+            get: () => ({
+                length: 1,
+                end: () => 6
+            })
+        });
+        video.dispatchEvent(new Event('waiting'));
+    });
+    await pageOne.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Together'));
+    await pageTwo.waitForFunction(() => document.getElementById('join-status-stream').textContent.includes('already lined up'));
 
     await pageOne.waitForFunction(() => document.getElementById('user-count-display').textContent.includes('2'));
     await pageTwo.waitForFunction(() => document.getElementById('user-count-display').textContent.includes('2'));
     await pageOne.waitForFunction(() => document.getElementById('video-player').readyState >= 2);
     await pageTwo.waitForFunction(() => document.getElementById('video-player').readyState >= 2);
     const roomCode = await pageOne.evaluate(() => new URL(window.location.href).searchParams.get('room'));
-    await pageOne.waitForFunction(() => !!document.getElementById('pip-button'));
+    await pageOne.waitForFunction(() => !document.getElementById('pip-button'));
     await pageOne.waitForFunction(() => document.getElementById('diagnostics-role').textContent.length > 0);
     await pageTwo.waitForFunction(() => document.getElementById('diagnostics-browser').textContent.length > 0);
     await pageOne.waitForFunction(() => document.getElementById('presence-status').textContent.includes('Partner'));
@@ -347,7 +369,12 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
     await pageOne.waitForFunction(() => document.getElementById('subtitle-container').textContent.includes('Hello from English subtitles.'));
     await pageTwo.waitForFunction(() => document.getElementById('subtitle-container').textContent.includes('Hello from English subtitles.'));
 
+    await pageOne.locator('#join-button').click();
+    await pageOne.waitForFunction(() => document.getElementById('video-player').paused === false);
+    await pageTwo.waitForFunction(() => document.getElementById('video-player').paused === false);
+
     await pageOne.locator('#settings-button').click();
+    await pageOne.locator('#settings-home-subtitles').click();
     await pageOne.evaluate(() => {
         const subtitleButton = Array.from(document.querySelectorAll('#subtitle-buttons-container button'))
             .find(button => button.querySelector('.subtitle-button-title')?.textContent === 'Nederlands');
@@ -355,25 +382,22 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
     });
     await pageTwo.waitForFunction(() => document.querySelector('#subtitle-buttons-container button.active .subtitle-button-title')?.textContent === 'Nederlands');
 
-    await pageOne.locator('#settings-button').click();
     await pageOne.locator('#subtitle-offset-forward-fine').click();
     await pageOne.waitForFunction(() => document.getElementById('subtitle-offset-display').textContent === '+100ms');
     await pageTwo.waitForFunction(() => document.getElementById('subtitle-offset-display').textContent === '+100ms');
     await pageOne.waitForFunction(() => document.getElementById('subtitle-container').textContent.includes('Nederlandse ondertitels verschoven.'));
     await pageTwo.waitForFunction(() => document.getElementById('subtitle-container').textContent.includes('Nederlandse ondertitels verschoven.'));
+    await pageOne.locator('#close-settings-button').click();
 
     await pageTwo.locator('#settings-button').click();
+    await pageTwo.locator('#settings-home-subtitles').click();
     await pageTwo.evaluate(() => {
         const subtitleButton = Array.from(document.querySelectorAll('#subtitle-buttons-container button'))
             .find(button => button.querySelector('.subtitle-button-title')?.textContent === 'Subtitles off');
         subtitleButton?.click();
     });
     await pageOne.waitForFunction(() => document.querySelector('#subtitle-buttons-container button.active .subtitle-button-title')?.textContent === 'Subtitles off');
-
-    await pageOne.locator('#play-pause-button').click();
-
-    await pageOne.waitForFunction(() => document.getElementById('video-player').paused === false);
-    await pageTwo.waitForFunction(() => document.getElementById('video-player').paused === false);
+    await pageTwo.locator('#close-settings-button').click();
 
     await pageOne.locator('#forward-button').click();
 
@@ -410,7 +434,11 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
         document.getElementById('video-player').currentTime = 1;
     });
 
+    await pageTwo.evaluate(() => {
+        document.getElementById('video-wrapper').classList.add('ui-visible');
+    });
     await pageTwo.locator('#settings-button').click();
+    await pageTwo.locator('#settings-home-playback').click();
     await pageTwo.locator('#resync-button').click();
     await delay(1500);
 
@@ -556,15 +584,17 @@ test('players recover from reconnects and leader handoff', { timeout: 150_000 },
     const sharedRoomUrl = await leaderPage.evaluate(() => window.location.href);
     await followerPage.goto(sharedRoomUrl, { waitUntil: 'domcontentloaded' });
 
-    await leaderPage.locator('#join-button').click();
+    await leaderPage.evaluate(() => document.getElementById('join-button').click());
     await followerPage.locator('#join-button').click();
+    await leaderPage.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Together'));
+    await followerPage.waitForFunction(() => document.getElementById('join-button').textContent.includes('Waiting for Start'));
 
     await leaderPage.waitForFunction(() => document.getElementById('user-count-display').textContent.includes('2'));
     await followerPage.waitForFunction(() => document.getElementById('user-count-display').textContent.includes('2'));
     await leaderPage.waitForFunction(() => document.getElementById('video-player').readyState >= 2);
     await followerPage.waitForFunction(() => document.getElementById('video-player').readyState >= 2);
 
-    await leaderPage.locator('#play-pause-button').click();
+    await leaderPage.locator('#join-button').click();
     await leaderPage.waitForFunction(() => document.getElementById('video-player').paused === false);
     await followerPage.waitForFunction(() => document.getElementById('video-player').paused === false);
 
@@ -626,5 +656,152 @@ test('players recover from reconnects and leader handoff', { timeout: 150_000 },
     assert.ok(
         Math.abs(timesAfterHandoff[0] - timesAfterHandoff[1]) < 1.5,
         `Players drifted too far after leader handoff: ${timesAfterHandoff.join(' vs ')}\n${serverLogs}`
+    );
+});
+
+test('mobile seek recovery avoids snapshot storms after waiting events', { timeout: 120_000 }, async (t) => {
+    assert.ok(fs.existsSync(ffmpegPath), `FFmpeg fixture generator not found at ${ffmpegPath}`);
+    assert.ok(fs.existsSync(chromePath), `Chrome not found at ${chromePath}`);
+
+    const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'togethervideo-mobile-seek-'));
+    const mediaRoot = path.join(tempRoot, 'media');
+    const cacheRoot = path.join(tempRoot, 'cache');
+    const progressPath = path.join(tempRoot, 'progress.json');
+    const seasonDir = path.join(mediaRoot, 'Series', 'Pocket Sync', 'Season 1');
+    const episodeOne = path.join(seasonDir, 'Pocket Sync S01E01.mp4');
+
+    await fsp.mkdir(seasonDir, { recursive: true });
+    await fsp.mkdir(cacheRoot, { recursive: true });
+    await fsp.writeFile(progressPath, '{}');
+    createFixtureVideo(episodeOne);
+
+    const port = await getFreePort();
+    const serverProcess = spawn(process.execPath, ['server.js'], {
+        cwd: repoRoot,
+        env: {
+            ...process.env,
+            PORT: String(port),
+            VIDEOS_DIRECTORY: mediaRoot,
+            CACHE_DIRECTORY: cacheRoot,
+            PROGRESS_FILE_PATH: progressPath,
+            TMDB_API_KEY: ''
+        },
+        stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let serverLogs = '';
+    serverProcess.stdout.on('data', chunk => {
+        serverLogs += chunk.toString();
+    });
+    serverProcess.stderr.on('data', chunk => {
+        serverLogs += chunk.toString();
+    });
+
+    const cleanup = async () => {
+        if (!serverProcess.killed) {
+            serverProcess.kill('SIGTERM');
+            await delay(500);
+            if (!serverProcess.killed) {
+                serverProcess.kill('SIGKILL');
+            }
+        }
+        await fsp.rm(tempRoot, { recursive: true, force: true });
+    };
+
+    t.after(cleanup);
+
+    await waitForServer(`http://127.0.0.1:${port}/`);
+
+    const browser = await chromium.launch({
+        executablePath: chromePath,
+        headless: true
+    });
+
+    t.after(async () => {
+        await browser.close();
+    });
+
+    const mobileProfile = {
+        ...devices['iPhone 13'],
+        viewport: { width: 844, height: 390 },
+        screen: { width: 844, height: 390 }
+    };
+
+    const leaderContext = await browser.newContext(mobileProfile);
+    const followerContext = await browser.newContext(mobileProfile);
+
+    t.after(async () => {
+        await Promise.allSettled([
+            leaderContext.close(),
+            followerContext.close()
+        ]);
+    });
+
+    const leaderPage = await leaderContext.newPage();
+    const followerPage = await followerContext.newPage();
+
+    await installMediaMock(leaderPage);
+    await installMediaMock(followerPage);
+
+    const videoParam = encodeURIComponent('Series/Pocket Sync/Season 1/Pocket Sync S01E01.mp4');
+    const playerUrl = `http://127.0.0.1:${port}/player.html?video=${videoParam}`;
+
+    await leaderPage.goto(playerUrl, { waitUntil: 'domcontentloaded' });
+    await leaderPage.waitForFunction(() => new URLSearchParams(window.location.search).get('room'));
+    const sharedRoomUrl = await leaderPage.evaluate(() => window.location.href);
+    await followerPage.goto(sharedRoomUrl, { waitUntil: 'domcontentloaded' });
+
+    await leaderPage.evaluate(() => document.getElementById('join-button').click());
+    await followerPage.locator('#join-button').click();
+    await leaderPage.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Together'));
+    await followerPage.waitForFunction(() => document.getElementById('join-button').textContent.includes('Waiting for Start'));
+
+    await leaderPage.locator('#join-button').click();
+    await leaderPage.waitForFunction(() => document.getElementById('video-player').paused === false);
+    await followerPage.waitForFunction(() => document.getElementById('video-player').paused === false);
+    await leaderPage.waitForFunction(() => document.body.classList.contains('compact-landscape'));
+    await followerPage.waitForFunction(() => document.body.classList.contains('compact-landscape'));
+
+    await delay(1200);
+    const baselineTelemetry = await getTelemetrySummary(port);
+    const baselineSnapshots = baselineTelemetry.counts?.snapshot || 0;
+
+    await followerPage.evaluate(() => {
+        document.getElementById('forward-button').click();
+        window.setTimeout(() => {
+            const video = document.getElementById('video-player');
+            video.dispatchEvent(new Event('waiting'));
+            video.dispatchEvent(new Event('stalled'));
+        }, 60);
+    });
+
+    await delay(2600);
+
+    const finalTelemetry = await getTelemetrySummary(port);
+    const snapshotDelta = (finalTelemetry.counts?.snapshot || 0) - baselineSnapshots;
+    const stateAfterSeek = await Promise.all([
+        leaderPage.evaluate(() => ({
+            time: document.getElementById('video-player').currentTime,
+            overlayVisible: document.getElementById('join-overlay').style.display !== 'none'
+        })),
+        followerPage.evaluate(() => ({
+            time: document.getElementById('video-player').currentTime,
+            overlayVisible: document.getElementById('join-overlay').style.display !== 'none'
+        }))
+    ]);
+
+    assert.ok(
+        Math.abs(stateAfterSeek[0].time - stateAfterSeek[1].time) < 1.5,
+        `Mobile players drifted too far after seek recovery: ${JSON.stringify(stateAfterSeek)}\n${serverLogs}`
+    );
+    assert.ok(
+        stateAfterSeek[0].time >= 29.5 && stateAfterSeek[1].time >= 29.5,
+        `Mobile seek did not hold near the requested position: ${JSON.stringify(stateAfterSeek)}\n${serverLogs}`
+    );
+    assert.equal(stateAfterSeek[0].overlayVisible, false, `Leader unexpectedly returned to the lobby after seek.\n${serverLogs}`);
+    assert.equal(stateAfterSeek[1].overlayVisible, false, `Follower unexpectedly returned to the lobby after seek.\n${serverLogs}`);
+    assert.ok(
+        snapshotDelta <= 1,
+        `Mobile seek triggered too many follow-up snapshots (${snapshotDelta}).\n${serverLogs}`
     );
 });
