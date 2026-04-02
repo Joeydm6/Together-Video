@@ -3841,7 +3841,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('requestSyncSnapshot', () => {
+    socket.on('requestSyncSnapshot', ({ requestId } = {}) => {
         const room = socket.currentRoom;
         if (!room) {
             return;
@@ -3856,6 +3856,7 @@ io.on('connection', (socket) => {
             if (freshFallbackSnapshot) {
                 socket.emit('roomSyncBootstrap', {
                     ...freshFallbackSnapshot,
+                    requestId: requestId || null,
                     snapshotSource: 'server-cache'
                 });
             }
@@ -3867,6 +3868,7 @@ io.on('connection', (socket) => {
             if (freshFallbackSnapshot) {
                 socket.emit('roomSyncBootstrap', {
                     ...freshFallbackSnapshot,
+                    requestId: requestId || null,
                     snapshotSource: 'server-cache'
                 });
             }
@@ -3883,6 +3885,7 @@ io.on('connection', (socket) => {
                 }
                 targetSocket.emit('roomSyncBootstrap', {
                     ...freshFallbackSnapshot,
+                    requestId: requestId || null,
                     snapshotSource: 'server-cache-deferred'
                 });
             }, SNAPSHOT_LEADER_RESPONSE_GRACE_MS);
@@ -3894,6 +3897,7 @@ io.on('connection', (socket) => {
 
         io.to(leaderSocketId).emit('requestSyncSnapshot', {
             targetSocketId: socket.id,
+            requestId: requestId || null,
             requestedAt: Date.now()
         });
     });
