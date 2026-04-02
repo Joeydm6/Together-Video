@@ -178,6 +178,37 @@ function installMediaMock(page) {
     });
 }
 
+function installCameraMock(page) {
+    return page.addInitScript(() => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 160;
+        canvas.height = 90;
+        const context = canvas.getContext('2d');
+        let frame = 0;
+        const paint = () => {
+            if (!context) {
+                return;
+            }
+            context.fillStyle = frame % 2 === 0 ? '#5b2b36' : '#2f4458';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.fillStyle = '#ffeef2';
+            context.font = '16px sans-serif';
+            context.fillText('Cam', 16, 48);
+            frame += 1;
+        };
+        paint();
+        setInterval(paint, 140);
+        const baseStream = canvas.captureStream(8);
+        if (!navigator.mediaDevices) {
+            Object.defineProperty(navigator, 'mediaDevices', {
+                configurable: true,
+                value: {}
+            });
+        }
+        navigator.mediaDevices.getUserMedia = async () => baseStream.clone();
+    });
+}
+
 test('homepage and player stay usable on mobile-sized screens', { timeout: 120_000 }, async (t) => {
     assert.ok(fs.existsSync(ffmpegPath), `FFmpeg fixture generator not found at ${ffmpegPath}`);
     assert.ok(fs.existsSync(chromePath), `Chrome not found at ${chromePath}`);
@@ -187,14 +218,23 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
     const cacheRoot = path.join(tempRoot, 'cache');
     const progressPath = path.join(tempRoot, 'progress.json');
     const seasonDir = path.join(mediaRoot, 'Series', 'Pocket Show', 'Season 1');
+    const secondSeasonDir = path.join(mediaRoot, 'Series', 'Second Pocket Show', 'Season 1');
     const episodeOne = path.join(seasonDir, 'Pocket Show S01E01 A Long Episode Name For Small Screens.mp4');
     const episodeTwo = path.join(seasonDir, 'Pocket Show S01E02 Another Long Episode Name.mp4');
+    const secondShowEpisode = path.join(secondSeasonDir, 'Second Pocket Show S01E01 Another Episode For Grid Coverage.mp4');
+    const englishSubtitle = path.join(seasonDir, 'Pocket Show S01E01 A Long Episode Name For Small Screens.en.srt');
 
     await fsp.mkdir(seasonDir, { recursive: true });
+    await fsp.mkdir(secondSeasonDir, { recursive: true });
     await fsp.mkdir(cacheRoot, { recursive: true });
     await fsp.writeFile(progressPath, '{}');
     createFixtureVideo(episodeOne);
     createFixtureVideo(episodeTwo);
+    createFixtureVideo(secondShowEpisode);
+    await fsp.writeFile(
+        englishSubtitle,
+        '1\n00:00:00,000 --> 00:00:10,000\nResponsive subtitle check.\n'
+    );
 
     const port = await getFreePort();
     const serverProcess = spawn(process.execPath, ['server.js'], {
@@ -234,11 +274,23 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
         await browser.close();
     });
 
+    const desktopContext = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        screen: { width: 1440, height: 900 }
+    });
+    const desktopPage = await desktopContext.newPage();
+    await installMediaMock(desktopPage);
+
+    t.after(async () => {
+        await desktopContext.close();
+    });
+
     const mobileContext = await browser.newContext({
         ...devices['iPhone 13']
     });
     const mobilePage = await mobileContext.newPage();
     await installMediaMock(mobilePage);
+    await installCameraMock(mobilePage);
 
     t.after(async () => {
         await mobileContext.close();
@@ -250,6 +302,18 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
     const homepageLayout = await mobilePage.evaluate(() => ({
         scrollFits: document.documentElement.scrollWidth <= window.innerWidth + 2,
         cardCount: document.querySelectorAll('.category-row .card').length,
+        fullyVisibleCardsInTwoUpRow: (() => {
+            const scroller = Array.from(document.querySelectorAll('.category-row .items-scroller')).find(node => (
+                node.querySelectorAll('.card').length >= 2
+            ));
+            if (!scroller) {
+                return 0;
+            }
+            return Array.from(scroller.querySelectorAll('.card')).filter(card => {
+                const rect = card.getBoundingClientRect();
+                return rect.left >= -1 && rect.right <= window.innerWidth + 1;
+            }).length;
+        })(),
         arrowTouchSize: Array.from(document.querySelectorAll('.scroll-arrow')).every(button => {
             const rect = button.getBoundingClientRect();
             return rect.width >= 44 && rect.height >= 44;
@@ -274,6 +338,7 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
 
     assert.equal(homepageLayout.scrollFits, true, 'Homepage overflows horizontally on mobile');
     assert.ok(homepageLayout.cardCount >= 1, 'Homepage did not render expected cards');
+    assert.ok(homepageLayout.fullyVisibleCardsInTwoUpRow >= 2, 'Homepage no longer keeps two cards visible on small mobile screens');
     assert.equal(homepageLayout.arrowTouchSize, true, 'Row arrows are too small for touch input');
     assert.equal(homepageLayout.searchVisible, true, 'Search UI is not visible on mobile homepage');
     assert.equal(homepageLayout.favoriteVisible, true, 'Favorite toggle is not visible on mobile');
@@ -292,71 +357,251 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
 
     const videoParam = encodeURIComponent('Series/Pocket Show/Season 1/Pocket Show S01E01 A Long Episode Name For Small Screens.mp4');
     await mobilePage.goto(`http://127.0.0.1:${port}/player.html?video=${videoParam}`, { waitUntil: 'domcontentloaded' });
-    await mobilePage.locator('#join-button').click();
-    await mobilePage.waitForFunction(() => document.getElementById('video-player').readyState >= 2);
-    await mobilePage.evaluate(() => document.getElementById('video-wrapper').classList.add('ui-visible'));
-    const videoRect = await mobilePage.locator('#video-player').boundingBox();
-    assert.ok(videoRect, 'Video element did not render on mobile');
-    await mobilePage.evaluate(() => document.getElementById('video-player').click());
-    await mobilePage.waitForFunction(() => !document.getElementById('video-wrapper').classList.contains('ui-visible'));
-    await mobilePage.evaluate(() => document.getElementById('video-player').click());
-    await mobilePage.waitForFunction(() => document.getElementById('video-wrapper').classList.contains('ui-visible'));
-    await mobilePage.evaluate(() => document.getElementById('settings-button').click());
-    await mobilePage.evaluate(() => document.getElementById('close-settings-button').click());
-    await mobilePage.waitForFunction(() => document.getElementById('combined-settings-panel').style.display !== 'block');
-    await mobilePage.evaluate(() => document.getElementById('settings-button').click());
-
-    const playerLayout = await mobilePage.evaluate(() => {
-        const panel = document.getElementById('combined-settings-panel').getBoundingClientRect();
-        const playButton = document.getElementById('play-pause-button').getBoundingClientRect();
-        const statusBadge = document.getElementById('sync-status-badge').getBoundingClientRect();
-        const userCount = document.getElementById('user-count-display').getBoundingClientRect();
-        const presence = document.getElementById('presence-status').getBoundingClientRect();
-        const statusMessage = document.getElementById('status-message').getBoundingClientRect();
-        const statusMessageVisible = document.getElementById('status-message').classList.contains('visible');
-        const video = document.getElementById('video-player').getBoundingClientRect();
-        const controls = document.getElementById('player-ui-container').getBoundingClientRect();
-        const isFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
-        const settingsOpen = document.body.classList.contains('settings-open');
+    const joinLayout = await mobilePage.evaluate(() => {
+        const menu = document.querySelector('.app-menu')?.getBoundingClientRect();
+        const panel = document.querySelector('.join-panel')?.getBoundingClientRect();
         return {
-            panelFits: panel.left >= 0 && panel.right <= window.innerWidth && panel.bottom <= window.innerHeight,
-            playButtonLargeEnough: playButton.width >= 44 && playButton.height >= 44,
-            statusVisible: statusBadge.width > 0 && statusBadge.top >= 0,
-            statusEmpty: document.getElementById('sync-status-badge').classList.contains('is-empty'),
+            alignedLeft: !!menu && !!panel && Math.abs(menu.left - panel.left) <= 2,
+            alignedRight: !!menu && !!panel && Math.abs(menu.right - panel.right) <= 2,
+            bottomGap: !!panel ? Math.max(0, window.innerHeight - panel.bottom) : Number.POSITIVE_INFINITY
+        };
+    });
+    assert.equal(joinLayout.alignedLeft, true, 'Join panel no longer aligns with the mobile menu on the left side');
+    assert.equal(joinLayout.alignedRight, true, 'Join panel no longer aligns with the mobile menu on the right side');
+    assert.ok(joinLayout.bottomGap <= 56, `Join panel leaves too much empty space below the actions on mobile (${joinLayout.bottomGap}px)`);
+    await mobilePage.locator('#join-button').click();
+    await mobilePage.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Watching'));
+    await mobilePage.locator('#join-button').click();
+    await mobilePage.waitForFunction(() => document.getElementById('join-overlay').style.display === 'none');
+    await mobilePage.waitForFunction(() => document.getElementById('video-player').readyState >= 2);
+    await mobilePage.waitForFunction(() => document.body.classList.contains('fullscreen-active'));
+    await mobilePage.waitForFunction(() => document.getElementById('subtitle-container').textContent.includes('Responsive subtitle check.'));
+    const portraitPlayback = await mobilePage.evaluate(() => {
+        const gate = document.getElementById('portrait-player-gate');
+        const backButton = document.getElementById('fullscreen-back-button');
+        const presence = document.getElementById('presence-status');
+        const syncBadge = document.getElementById('sync-status-badge');
+        return {
+            fullscreenActive: document.body.classList.contains('fullscreen-active'),
+            gateHidden: gate.hidden || gate.getBoundingClientRect().height === 0,
             noHorizontalOverflow: document.documentElement.scrollWidth <= window.innerWidth + 2,
             startsUnmuted: document.getElementById('video-player').muted === false,
-            playbackModePresent: !!document.getElementById('playback-mode-select'),
-            subtitleStylePresent: !!document.getElementById('subtitle-style-size'),
-            mobilePlayTogglePresent: !!document.getElementById('mobile-play-toggle'),
-            titleVisible: document.getElementById('video-title').getBoundingClientRect().height > 0,
-            isFullscreen,
-            settingsOpen,
-            controlsBelowVideo: isFullscreen || controls.top >= video.bottom - 1,
-            syncBadgeBelowVideo: isFullscreen || settingsOpen || statusBadge.top >= video.bottom - 1 || document.getElementById('sync-status-badge').classList.contains('is-empty'),
-            userCountBelowVideo: isFullscreen || settingsOpen || userCount.top >= video.bottom - 1,
-            presenceBelowVideo: isFullscreen || settingsOpen || presence.top >= video.bottom - 1,
-            statusBelowVideo: isFullscreen || settingsOpen || !statusMessageVisible || statusMessage.top >= video.bottom - 1,
-            presenceLabel: document.getElementById('presence-status').textContent,
-            presenceClickable: document.getElementById('presence-status')?.dataset?.clickable === 'true'
+            pipAllowed: document.getElementById('video-player').disablePictureInPicture === false,
+            closeButtonVisible: !!backButton && backButton.getBoundingClientRect().width >= 18 && backButton.getBoundingClientRect().height >= 18,
+            presenceHidden: window.getComputedStyle(presence).display === 'none',
+            syncBadgeHidden: window.getComputedStyle(syncBadge).display === 'none'
         };
     });
 
-    assert.equal(playerLayout.panelFits, true, 'Settings panel overflows the mobile viewport');
-    assert.equal(playerLayout.playButtonLargeEnough, true, 'Play button is too small on mobile');
-    assert.equal(playerLayout.statusVisible || playerLayout.statusEmpty, true, 'Sync badge state is invalid on mobile player');
-    assert.equal(playerLayout.noHorizontalOverflow, true, 'Player overflows horizontally on mobile');
-    assert.equal(playerLayout.startsUnmuted, true, 'Player starts muted on mobile after joining');
-    assert.equal(playerLayout.playbackModePresent, true, 'Playback mode selector is missing');
-    assert.equal(playerLayout.subtitleStylePresent, true, 'Subtitle style controls are missing');
-    assert.equal(playerLayout.mobilePlayTogglePresent, true, 'Mobile center play/pause control is missing');
-    assert.equal(playerLayout.titleVisible, true, 'Video title is not visible on mobile');
-    assert.equal(playerLayout.controlsBelowVideo, true, 'Mobile controls still overlap the video');
-    assert.equal(playerLayout.syncBadgeBelowVideo, true, 'Sync badge still overlaps the video on mobile');
-    assert.equal(playerLayout.userCountBelowVideo, true, 'User count still overlaps the video on mobile');
-    assert.equal(playerLayout.presenceBelowVideo, true, 'Presence text still overlaps the video on mobile');
-    assert.equal(playerLayout.statusBelowVideo, true, 'Status message still overlaps the video on mobile');
-    assert.ok(playerLayout.presenceLabel.length > 0, 'Presence label did not render');
-    assert.equal(playerLayout.presenceClickable, true, 'Invite badge is not clickable while waiting alone');
+    assert.equal(portraitPlayback.fullscreenActive, true, 'Mobile play did not switch into fullscreen landscape mode');
+    assert.equal(portraitPlayback.gateHidden, true, 'Portrait gate should not be shown once playback starts');
+    assert.equal(portraitPlayback.noHorizontalOverflow, true, 'Portrait mobile playback overflows horizontally');
+    assert.equal(portraitPlayback.startsUnmuted, true, 'Player starts muted on mobile after joining');
+    assert.equal(portraitPlayback.pipAllowed, true, 'Video element still disables Picture-in-Picture');
+    assert.equal(portraitPlayback.closeButtonVisible, true, 'Fullscreen close button is not visible on mobile');
+    assert.equal(portraitPlayback.presenceHidden, true, 'Partner status should be hidden during fullscreen playback');
+    assert.equal(portraitPlayback.syncBadgeHidden, true, 'Sync badge should be hidden during fullscreen playback');
+
+    await mobilePage.evaluate(() => document.getElementById('fullscreen-button').click());
+    await mobilePage.waitForFunction(() => document.getElementById('join-overlay').style.display !== 'none');
+    await mobilePage.waitForFunction(() => document.getElementById('video-player').paused === true);
+    await mobilePage.waitForFunction(() => !document.body.classList.contains('portrait-player-gate'));
+    await mobilePage.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Watching'));
+    await mobilePage.locator('#join-button').click();
+    await mobilePage.waitForFunction(() => document.getElementById('join-overlay').style.display === 'none');
+    await mobilePage.waitForFunction(() => document.body.classList.contains('fullscreen-active'));
+
+    await mobilePage.locator('#settings-button').click();
+    await mobilePage.locator('#settings-home-playback').click();
+    await mobilePage.locator('#webcam-toggle-button').click();
+    await mobilePage.waitForFunction(() => {
+        const dock = document.getElementById('webcam-dock');
+        const localCard = document.getElementById('webcam-local-card');
+        const localVideo = document.getElementById('webcam-local-video');
+        return dock.classList.contains('is-visible') && !localCard.hidden && Boolean(localVideo.srcObject);
+    });
+    await mobilePage.waitForFunction(() => document.getElementById('webcam-status-copy').textContent.includes('Camera is live'));
+    await mobilePage.locator('#close-settings-button').click();
+
+    await mobilePage.evaluate(() => {
+        document.getElementById('click-interceptor').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await mobilePage.waitForFunction(() => !document.getElementById('video-wrapper').classList.contains('ui-visible'));
+    const tapHideState = await mobilePage.evaluate(() => ({
+        paused: document.getElementById('video-player').paused,
+        controlsHidden: !document.getElementById('video-wrapper').classList.contains('ui-visible')
+    }));
+    assert.equal(tapHideState.paused, false, 'Tapping the fullscreen video should not pause playback');
+    assert.equal(tapHideState.controlsHidden, true, 'Tapping the fullscreen video should hide the controls');
+
+    await mobilePage.evaluate(() => {
+        document.getElementById('click-interceptor').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await mobilePage.waitForFunction(() => document.getElementById('video-wrapper').classList.contains('ui-visible'));
+
+    const pipCaptionState = await mobilePage.evaluate(async () => {
+        const video = document.getElementById('video-player');
+        await video.requestPictureInPicture();
+        const track = video.textTracks?.[0] || null;
+        const firstCue = track?.cues?.[0] || null;
+        return {
+            pipActive: document.pictureInPictureElement === video,
+            trackMode: track?.mode || null,
+            cueLine: firstCue?.line ?? null
+        };
+    });
+    assert.equal(pipCaptionState.pipActive, true, 'Picture-in-Picture should activate in the responsive smoke test');
+    assert.equal(pipCaptionState.trackMode, 'showing', 'Native subtitle track should be showing in Picture-in-Picture');
+    assert.equal(pipCaptionState.cueLine, 65, 'Picture-in-Picture subtitles should use the fixed standard height');
+
+    await mobilePage.evaluate(() => document.exitPictureInPicture());
+
+    await mobilePage.locator('#fullscreen-back-button').click();
+    await mobilePage.waitForFunction(() => document.getElementById('join-overlay').style.display !== 'none');
+    await mobilePage.waitForFunction(() => !document.body.classList.contains('fullscreen-active'));
+
+    await desktopPage.goto(`http://127.0.0.1:${port}/player.html?video=${videoParam}`, { waitUntil: 'domcontentloaded' });
+    await desktopPage.waitForFunction(() => document.getElementById('join-button').getBoundingClientRect().height > 0);
+    await desktopPage.locator('#join-button').click();
+    await desktopPage.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Watching'));
+    await desktopPage.locator('#join-button').click();
+    await desktopPage.waitForFunction(() => document.getElementById('join-overlay').style.display === 'none');
+    await desktopPage.waitForFunction(() => document.body.classList.contains('fullscreen-active'));
+    const desktopFullscreenLayout = await desktopPage.evaluate(() => {
+        const backButton = document.getElementById('fullscreen-back-button').getBoundingClientRect();
+        const userCount = document.getElementById('user-count-display').getBoundingClientRect();
+        const presence = document.getElementById('presence-status');
+        const syncBadge = document.getElementById('sync-status-badge');
+        return {
+            fullscreenActive: document.body.classList.contains('fullscreen-active'),
+            presenceHidden: window.getComputedStyle(presence).display === 'none',
+            syncHidden: window.getComputedStyle(syncBadge).display === 'none',
+            alignedTop: Math.abs(backButton.top - userCount.top) <= 2,
+            leftInset: backButton.left >= 16,
+            rightInset: (window.innerWidth - userCount.right) >= 16
+        };
+    });
+    assert.equal(desktopFullscreenLayout.fullscreenActive, true, 'Desktop playback did not enter fullscreen or immersive mode');
+    assert.equal(desktopFullscreenLayout.presenceHidden, true, 'Partner status should be hidden in desktop fullscreen playback');
+    assert.equal(desktopFullscreenLayout.syncHidden, true, 'Sync badge should be hidden in desktop fullscreen playback');
+    assert.equal(desktopFullscreenLayout.alignedTop, true, 'Desktop fullscreen back button and viewer badge are vertically misaligned');
+    assert.equal(desktopFullscreenLayout.leftInset, true, 'Desktop fullscreen back button sits too close to the left edge');
+    assert.equal(desktopFullscreenLayout.rightInset, true, 'Desktop fullscreen viewer badge sits too close to the right edge');
+
+    const tabletContext = await browser.newContext({
+        ...devices['iPad Pro 11']
+    });
+    const tabletPage = await tabletContext.newPage();
+    await installMediaMock(tabletPage);
+    await tabletPage.route('**/api/video-info?**', async route => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                duration: 30,
+                isProblematic: false,
+                bitrateKbps: 6800,
+                width: 1920,
+                height: 1080,
+                videoCodec: 'h264',
+                audioCodec: 'aac',
+                audioTracks: [],
+                supportedFormats: ['mp4', 'webm'],
+                transcodingAvailable: true
+            })
+        });
+    });
+
+    t.after(async () => {
+        await tabletContext.close();
+    });
+
+    await tabletPage.goto(`http://127.0.0.1:${port}/player.html?video=${videoParam}`, { waitUntil: 'domcontentloaded' });
+    await tabletPage.waitForFunction(() => {
+        const select = document.getElementById('playback-mode-select');
+        const video = document.getElementById('video-player');
+        return select?.value === 'data-saver' && String(video.currentSrc || video.src).includes('mode=data-saver');
+    });
+    const tabletAutoMode = await tabletPage.evaluate(() => ({
+        mode: document.getElementById('playback-mode-select')?.value || '',
+        src: String(document.getElementById('video-player').currentSrc || document.getElementById('video-player').src || ''),
+        joinMeta: document.getElementById('join-meta-mode')?.textContent?.trim() || ''
+    }));
+    assert.equal(tabletAutoMode.mode, 'data-saver', 'Tablet did not default to Data Save Mode for heavy media');
+    assert.equal(tabletAutoMode.src.includes('mode=data-saver'), true, 'Tablet player did not request a data-saver stream for heavy media');
+    assert.equal(tabletAutoMode.joinMeta.includes('Data Save Mode'), true, 'Tablet join state did not reflect the automatic data-saver choice');
+
+    const storageGuardContext = await browser.newContext({
+        ...devices['iPhone 13']
+    });
+    const storageGuardPage = await storageGuardContext.newPage();
+    await installMediaMock(storageGuardPage);
+    await storageGuardPage.addInitScript(() => {
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function setItem(key, value) {
+            if (this === window.localStorage || this === window.sessionStorage) {
+                throw new Error('storage blocked');
+            }
+            return originalSetItem.call(this, key, value);
+        };
+    });
+
+    t.after(async () => {
+        await storageGuardContext.close();
+    });
+
+    await storageGuardPage.goto(`http://127.0.0.1:${port}/player.html?video=${videoParam}`, { waitUntil: 'domcontentloaded' });
+    await storageGuardPage.waitForFunction(() => {
+        const roomCode = document.getElementById('join-room-code')?.textContent || '';
+        const title = document.getElementById('join-video-title')?.textContent || '';
+        return roomCode.trim() !== '------' && !title.includes('Loading video');
+    });
+    const storageGuardState = await storageGuardPage.evaluate(() => ({
+        roomCode: document.getElementById('join-room-code')?.textContent?.trim() || '',
+        title: document.getElementById('join-video-title')?.textContent?.trim() || '',
+        meta: document.getElementById('join-meta-mode')?.textContent?.trim() || ''
+    }));
+    assert.notEqual(storageGuardState.roomCode, '------', 'Player should still create and show a room when storage writes fail');
+    assert.notEqual(storageGuardState.title, 'Loading video...', 'Player should still resolve the current video when storage writes fail');
+
+    const autoplayGuardContext = await browser.newContext({
+        ...devices['iPhone 13']
+    });
+    const autoplayGuardPage = await autoplayGuardContext.newPage();
+    await installMediaMock(autoplayGuardPage);
+    await autoplayGuardPage.addInitScript(() => {
+        for (const key of ['requestFullscreen', 'webkitRequestFullscreen', 'webkitRequestFullScreen', 'mozRequestFullScreen', 'msRequestFullscreen']) {
+            Object.defineProperty(Element.prototype, key, {
+                configurable: true,
+                value: undefined
+            });
+            Object.defineProperty(HTMLElement.prototype, key, {
+                configurable: true,
+                value: undefined
+            });
+        }
+        localStorage.setItem('tv-has-interacted', 'true');
+        sessionStorage.setItem('hasInteracted', 'true');
+    });
+
+    t.after(async () => {
+        await autoplayGuardContext.close();
+    });
+
+    await autoplayGuardPage.goto(`http://127.0.0.1:${port}/player.html?video=${videoParam}&autoplay=true`, { waitUntil: 'domcontentloaded' });
+    await autoplayGuardPage.waitForFunction(() => document.getElementById('video-player').readyState >= 2);
+    await delay(1200);
+    const autoplayGuardState = await autoplayGuardPage.evaluate(() => {
+        const joinVisible = document.getElementById('join-overlay').style.display !== 'none';
+        const gateVisible = document.body.classList.contains('portrait-player-gate') && !document.getElementById('portrait-player-gate').hidden;
+        return {
+            joinVisible,
+            gateVisible,
+            fullscreenActive: document.body.classList.contains('fullscreen-active') || !!document.fullscreenElement || !!document.webkitFullscreenElement
+        };
+    });
+    assert.equal(autoplayGuardState.fullscreenActive, false, 'Autoplay guard test unexpectedly entered fullscreen');
+    assert.equal(autoplayGuardState.joinVisible || autoplayGuardState.gateVisible, true, 'Mobile autoplay should not expose a free portrait player when fullscreen is unavailable');
 
     const landscapeContext = await browser.newContext({
         ...devices['iPhone 13'],
@@ -373,13 +618,34 @@ test('homepage and player stay usable on mobile-sized screens', { timeout: 120_0
     await landscapePage.goto(`http://127.0.0.1:${port}/player.html?video=${videoParam}`, { waitUntil: 'domcontentloaded' });
     await landscapePage.waitForFunction(() => document.getElementById('join-button').getBoundingClientRect().height > 0);
     await landscapePage.locator('#join-button').click();
+    await landscapePage.waitForFunction(() => document.getElementById('join-button').textContent.includes('Start Watching'));
+    await landscapePage.locator('#join-button').click();
+    await landscapePage.waitForFunction(() => document.getElementById('join-overlay').style.display === 'none');
     await landscapePage.waitForFunction(() => document.getElementById('video-player').readyState >= 2);
     await landscapePage.waitForFunction(() => document.body.classList.contains('compact-landscape'));
     await landscapePage.waitForFunction(() => document.getElementById('video-player').getBoundingClientRect().height > 180);
     await landscapePage.evaluate(() => document.getElementById('video-wrapper').classList.add('ui-visible'));
     await landscapePage.waitForFunction(() => document.getElementById('player-ui-container').getBoundingClientRect().height > 0);
-    await landscapePage.evaluate(() => document.getElementById('fullscreen-button').click());
-    await landscapePage.waitForFunction(() => document.body.classList.contains('fullscreen-active') || !!document.fullscreenElement || !!document.webkitFullscreenElement);
+    await landscapePage.evaluate(() => document.getElementById('settings-button').click());
+    await landscapePage.waitForFunction(() => document.body.classList.contains('settings-open'));
+    const landscapeSettings = await landscapePage.evaluate(() => {
+        const panel = document.getElementById('combined-settings-panel').getBoundingClientRect();
+        const playButton = document.getElementById('play-pause-button').getBoundingClientRect();
+        return {
+            panelFits: panel.left >= 0 && panel.right <= window.innerWidth && panel.bottom <= window.innerHeight,
+            playButtonLargeEnough: playButton.width >= 44 && playButton.height >= 44,
+            playbackModePresent: !!document.getElementById('playback-mode-select'),
+            subtitleStylePresent: !!document.getElementById('subtitle-style-size'),
+            pipButtonMissing: !document.getElementById('pip-button')
+        };
+    });
+    assert.equal(landscapeSettings.panelFits, true, 'Landscape settings panel overflows the viewport');
+    assert.equal(landscapeSettings.playButtonLargeEnough, true, 'Landscape play button is too small on mobile');
+    assert.equal(landscapeSettings.playbackModePresent, true, 'Playback mode selector is missing in landscape');
+    assert.equal(landscapeSettings.subtitleStylePresent, true, 'Subtitle style controls are missing in landscape');
+    assert.equal(landscapeSettings.pipButtonMissing, true, 'PiP button should not be shown in the mobile player UI');
+    await landscapePage.evaluate(() => document.getElementById('close-settings-button').click());
+    await landscapePage.waitForFunction(() => !document.body.classList.contains('settings-open'));
 
     const landscapeLayout = await landscapePage.evaluate(() => {
         const video = document.getElementById('video-player').getBoundingClientRect();

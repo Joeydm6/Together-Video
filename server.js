@@ -989,7 +989,10 @@ function classifyVideoMetadata(metadata, videoRelativePath) {
         audioStream,
         audioTracks,
         isProblematic,
-        duration: Number(metadata.format?.duration || 0)
+        duration: Number(metadata.format?.duration || 0),
+        bitrateKbps: Math.round((Number(metadata.format?.bit_rate || videoStream?.bit_rate || 0) || 0) / 1000),
+        width: Number(videoStream?.width || 0) || 0,
+        height: Number(videoStream?.height || 0) || 0
     };
 }
 
@@ -2284,10 +2287,13 @@ app.get('/api/video-info', async (req, res) => {
     
     try {
         getCachedProbeResult(videoFullPath, videoRelativePath)
-            .then(({ duration, isProblematic, videoStream, audioStream, audioTracks }) => {
+            .then(({ duration, isProblematic, videoStream, audioStream, audioTracks, bitrateKbps, width, height }) => {
                 res.json({
                     duration,
                     isProblematic,
+                    bitrateKbps,
+                    width,
+                    height,
                     videoCodec: videoStream?.codec_name || 'unknown',
                     audioCodec: audioStream?.codec_name || 'unknown',
                     audioTracks: audioTracks || [],
