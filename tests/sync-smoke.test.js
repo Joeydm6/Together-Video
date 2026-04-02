@@ -440,6 +440,7 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
         document.getElementById('video-player').currentTime = 1;
     });
 
+    const bootstrapCountBeforeManualResync = (await getTelemetrySummary(port)).counts?.bootstrap || 0;
     await pageTwo.evaluate(() => {
         document.getElementById('video-wrapper').classList.add('ui-visible');
     });
@@ -456,6 +457,12 @@ test('two players stay in sync for play, seek and pause', { timeout: 120_000 }, 
     assert.ok(
         Math.abs(timesAfterManualResync[0] - timesAfterManualResync[1]) < 1.25,
         `Players drifted too far after manual resync: ${timesAfterManualResync.join(' vs ')}\n${serverLogs}`
+    );
+    const bootstrapCountAfterManualResync = (await getTelemetrySummary(port)).counts?.bootstrap || 0;
+    assert.equal(
+        bootstrapCountAfterManualResync - bootstrapCountBeforeManualResync,
+        0,
+        `Manual resync unexpectedly fell back to a server bootstrap snapshot.\n${serverLogs}`
     );
 
     await pageOne.evaluate(() => {

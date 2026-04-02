@@ -27,6 +27,7 @@ const API_RATE_LIMIT_MAX_REQUESTS = 300;
 const VIDEO_RATE_LIMIT_MAX_REQUESTS = 2500;
 const PENDING_PLAY_TIMEOUT_MS = 18000;
 const SNAPSHOT_FALLBACK_AGE_MS = 15000;
+const SNAPSHOT_LEADER_RESPONSE_GRACE_MS = 450;
 
 // --- FFmpeg Path Configuration ---
 // If you installed FFmpeg to a different location, update this path.
@@ -154,6 +155,7 @@ const searchIndexState = { entries: null, builtAt: 0, promise: null };
 const homepageResponseCache = { payload: null, expiresAt: 0, promise: null };
 const directoryResponseCache = new Map();
 const playbackTelemetry = [];
+const pendingSnapshotFallbacks = new Map();
 
 const TMDB_CACHE_TTL_MS = Number(process.env.TMDB_CACHE_TTL_MS) || 7 * 24 * 60 * 60 * 1000;
 const TMDB_PINNED_CACHE_TTL_MS = Number(process.env.TMDB_PINNED_CACHE_TTL_MS) || 30 * 24 * 60 * 60 * 1000;
@@ -3103,6 +3105,16 @@ function clearPendingAction(room) {
     state.pendingAction = null;
 }
 
+function clearPendingSnapshotFallback(targetSocketId) {
+    const pending = pendingSnapshotFallbacks.get(targetSocketId);
+    if (!pending) {
+        return;
+    }
+
+    clearTimeout(pending.timer);
+    pendingSnapshotFallbacks.delete(targetSocketId);
+}
+
 function getRoomClientCount(room) {
     return roomStates[room] ? Object.keys(roomStates[room].clients).length : 0;
 }
@@ -3836,20 +3848,48 @@ io.on('connection', (socket) => {
         }
 
         const fallbackSnapshot = getRoomSyncSnapshot(room);
-        if (fallbackSnapshot && (Date.now() - (fallbackSnapshot.updatedAt || 0)) <= SNAPSHOT_FALLBACK_AGE_MS) {
-            socket.emit('roomSyncBootstrap', {
-                ...fallbackSnapshot,
-                snapshotSource: 'server-cache'
-            });
-        }
+        const freshFallbackSnapshot = fallbackSnapshot && (Date.now() - (fallbackSnapshot.updatedAt || 0)) <= SNAPSHOT_FALLBACK_AGE_MS
+            ? fallbackSnapshot
+            : null;
 
         if (!roomLeaders[room]) {
+            if (freshFallbackSnapshot) {
+                socket.emit('roomSyncBootstrap', {
+                    ...freshFallbackSnapshot,
+                    snapshotSource: 'server-cache'
+                });
+            }
             return;
         }
 
         const leaderSocketId = roomLeaders[room];
         if (leaderSocketId === socket.id) {
+            if (freshFallbackSnapshot) {
+                socket.emit('roomSyncBootstrap', {
+                    ...freshFallbackSnapshot,
+                    snapshotSource: 'server-cache'
+                });
+            }
             return;
+        }
+
+        clearPendingSnapshotFallback(socket.id);
+        if (freshFallbackSnapshot) {
+            const timer = setTimeout(() => {
+                pendingSnapshotFallbacks.delete(socket.id);
+                const targetSocket = io.sockets.sockets.get(socket.id);
+                if (!targetSocket || targetSocket.currentRoom !== room) {
+                    return;
+                }
+                targetSocket.emit('roomSyncBootstrap', {
+                    ...freshFallbackSnapshot,
+                    snapshotSource: 'server-cache-deferred'
+                });
+            }, SNAPSHOT_LEADER_RESPONSE_GRACE_MS);
+            pendingSnapshotFallbacks.set(socket.id, {
+                room,
+                timer
+            });
         }
 
         io.to(leaderSocketId).emit('requestSyncSnapshot', {
@@ -3875,6 +3915,7 @@ io.on('connection', (socket) => {
         updateRoomSyncSnapshot(room, payload);
 
         if (targetSocketId) {
+            clearPendingSnapshotFallback(targetSocketId);
             io.to(targetSocketId).emit('syncSnapshot', payload);
             return;
         }
@@ -3884,6 +3925,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnecting', () => {
         console.log(`User disconnecting: ${socket.id}`);
+        clearPendingSnapshotFallback(socket.id);
         const currentRoom = Array.from(socket.rooms).find(room => room !== socket.id);
         
         if (currentRoom) {
