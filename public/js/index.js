@@ -52,8 +52,8 @@
             let showFolderBulkActions = false;
             let showMetadataOverflowActions = false;
             const favoritesKey = 'tv-favorites';
-            const recentSearchesKey = 'tv-recent-searches';
             const installDisplayModeQuery = window.matchMedia ? window.matchMedia('(display-mode: standalone)') : null;
+            let activeContinueWatchingMenu = null;
             const isStandaloneApp = () => (installDisplayModeQuery?.matches ?? false) || window.navigator.standalone === true;
             const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
             const positionFloatingMenu = (menu, pageX, pageY) => {
@@ -78,6 +78,113 @@
                     return;
                 }
                 installAppButton.hidden = !deferredInstallPrompt || isStandaloneApp();
+            };
+            const setStatusMessage = (message, timeoutMs = 0) => {
+                status.textContent = message || '';
+                if (setStatusMessage.timer) {
+                    clearTimeout(setStatusMessage.timer);
+                    setStatusMessage.timer = null;
+                }
+                if (message && timeoutMs > 0) {
+                    setStatusMessage.timer = window.setTimeout(() => {
+                        if (status.textContent === message) {
+                            status.textContent = '';
+                        }
+                    }, timeoutMs);
+                }
+            };
+            const postJson = async (url, payload) => {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || response.statusText || 'Request failed');
+                }
+                return data;
+            };
+            const closeContinueWatchingMenu = () => {
+                if (!activeContinueWatchingMenu) {
+                    return;
+                }
+                activeContinueWatchingMenu.menu.hidden = true;
+                activeContinueWatchingMenu.button.setAttribute('aria-expanded', 'false');
+                activeContinueWatchingMenu = null;
+            };
+            const toggleContinueWatchingMenu = (menu, button) => {
+                if (!menu || !button) {
+                    return;
+                }
+                if (activeContinueWatchingMenu?.menu === menu) {
+                    closeContinueWatchingMenu();
+                    return;
+                }
+                closeContinueWatchingMenu();
+                menu.hidden = false;
+                button.setAttribute('aria-expanded', 'true');
+                activeContinueWatchingMenu = { menu, button };
+            };
+            const markVideoProgress = async (videoFile, watched) => {
+                return postJson('/api/progress/mark', { videoFile, watched });
+            };
+            const runContinueWatchingBulkAction = async (action, busyButton) => {
+                const labels = {
+                    clear: 'Resetting Continue Watching...',
+                    'mark-watched': 'Marking everything as watched...'
+                };
+                const successLabels = {
+                    clear: 'Continue Watching cleared',
+                    'mark-watched': 'Continue Watching marked as watched'
+                };
+                if (busyButton) {
+                    busyButton.disabled = true;
+                }
+                closeContinueWatchingMenu();
+                setStatusMessage(labels[action] || 'Updating Continue Watching...');
+                try {
+                    await postJson('/api/continue-watching/bulk-action', { action });
+                    await loadRecentlyWatched(1);
+                    setStatusMessage(successLabels[action] || 'Continue Watching updated', 1800);
+                } catch (error) {
+                    console.error('Failed continue watching bulk action:', error);
+                    setStatusMessage(`Error: ${error.message}`, 2600);
+                } finally {
+                    if (busyButton) {
+                        busyButton.disabled = false;
+                    }
+                }
+            };
+            const runContinueWatchingItemAction = async (item, action) => {
+                if (!item?.url) {
+                    return;
+                }
+                closeContinueWatchingMenu();
+                if (action === 'start-over') {
+                    setStatusMessage(`Resetting "${item.name}"...`);
+                    const result = await markVideoProgress(item.url, false);
+                    window.location.href = `player.html?video=${encodeURIComponent(result.videoFile || item.url)}`;
+                    return;
+                }
+                if (action === 'mark-watched') {
+                    await markVideoProgress(item.url, true);
+                    await loadRecentlyWatched(1);
+                    setStatusMessage(`Marked "${item.name}" as watched`, 1800);
+                    return;
+                }
+                if (item.seriesPath) {
+                    await postJson('/api/continue-watching/series-action', {
+                        seriesPath: item.seriesPath,
+                        action: 'mark-unwatched'
+                    });
+                    await loadRecentlyWatched(1);
+                    setStatusMessage(`Removed "${item.name}" from Continue Watching`, 1800);
+                    return;
+                }
+                await markVideoProgress(item.url, false);
+                await loadRecentlyWatched(1);
+                setStatusMessage(`Removed "${item.name}" from Continue Watching`, 1800);
             };
             const cleanEpisodeTitle = (value) => value
                 .replace(/\.[^.]+$/, '')
@@ -275,20 +382,6 @@
                     return [];
                 }
             };
-            const getRecentSearches = () => {
-                try {
-                    const parsed = JSON.parse(localStorage.getItem(recentSearchesKey) || '[]');
-                    return Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string' && item.trim().length >= 2) : [];
-                } catch {
-                    return [];
-                }
-            };
-            const saveRecentSearches = (entries) => {
-                localStorage.setItem(recentSearchesKey, JSON.stringify(entries.slice(0, 8)));
-            };
-            const clearRecentSearches = () => {
-                localStorage.removeItem(recentSearchesKey);
-            };
             const escapeHtml = (value = '') => value
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
@@ -303,14 +396,6 @@
                 }
                 const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 return safeValue.replace(new RegExp(`(${escapedQuery})`, 'ig'), '<mark class="search-highlight">$1</mark>');
-            };
-            const rememberSearch = (query) => {
-                if (!query || query.length < 2) {
-                    return;
-                }
-                const normalized = query.trim();
-                const nextEntries = [normalized, ...getRecentSearches().filter(item => item.toLowerCase() !== normalized.toLowerCase())];
-                saveRecentSearches(nextEntries);
             };
             const setActiveSearchAssistChip = (nextIndex) => {
                 if (!searchAssist) {
@@ -375,45 +460,16 @@
                 }
                 activeSearchAssistIndex = -1;
                 const normalizedQuery = query.trim();
-                const recent = getRecentSearches();
                 const nextNodes = [];
                 if (normalizedQuery.length >= 2) {
                     const resultLabel = resultCount === null
                         ? 'Searching library...'
                         : `${resultCount} ${resultCount === 1 ? 'result' : 'results'}`;
                     nextNodes.push(createSearchAssistChip({ label: resultLabel, meta: true }));
-                    const relatedRecent = recent
-                        .filter((item) => item.toLowerCase() !== normalizedQuery.toLowerCase())
-                        .slice(0, 4);
-                    if (relatedRecent.length > 0) {
-                        relatedRecent.forEach((item) => {
-                            nextNodes.push(createSearchAssistChip({
-                                label: item,
-                                query: item,
-                                title: `Search again for ${item}`
-                            }));
-                        });
-                    } else {
-                        nextNodes.push(createSearchAssistChip({
-                            label: 'Press Enter to search',
-                            meta: true,
-                            secondary: true
-                        }));
-                    }
-                } else if (recent.length > 0) {
-                    nextNodes.push(createSearchAssistChip({ label: 'Recent searches', meta: true }));
-                    recent.slice(0, 5).forEach((item) => {
-                        nextNodes.push(createSearchAssistChip({
-                            label: item,
-                            query: item,
-                            title: `Repeat search for ${item}`
-                        }));
-                    });
                     nextNodes.push(createSearchAssistChip({
-                        label: 'Clear history',
-                        action: 'clear-history',
+                        label: 'Press Enter to search',
+                        meta: true,
                         secondary: true,
-                        title: 'Remove recent searches'
                     }));
                 } else if (document.activeElement === searchInput) {
                     nextNodes.push(createSearchAssistChip({
@@ -715,58 +771,78 @@
                 }
 
                 if (options.isContinueWatching) {
-                    const removeButton = document.createElement('button');
-                    removeButton.className = 'remove-from-continue';
-                    removeButton.title = item.seriesPath
-                        ? 'Remove series from Continue Watching'
-                        : 'Remove from Continue Watching';
-                    removeButton.innerHTML = `<svg fill="currentColor" viewBox="0 0 20 20" width="12" height="12"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>`;
-                    
-                    removeButton.addEventListener('click', async (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (removeButton.disabled) {
-                            return;
-                        }
-                        removeButton.disabled = true;
-                        try {
-                            if (item.seriesPath) {
-                                if (!window.confirm(`Remove "${item.name}" from Continue Watching? This resets progress for the full series.`)) {
-                                    return;
-                                }
-                                status.textContent = 'Removing series from Continue Watching...';
-                                const response = await fetch('/api/continue-watching/series-action', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        seriesPath: item.seriesPath,
-                                        action: 'mark-unwatched'
-                                    })
-                                });
-                                if (!response.ok) {
-                                    throw new Error(`Server error: ${response.statusText}`);
-                                }
-                                await loadRecentlyWatched();
-                                status.textContent = '';
-                                return;
-                            }
-
-                            socket.emit('markVideo', { videoFile: item.url, watched: false });
-                        } catch (error) {
-                            console.error('Failed to remove continue watching item:', error);
-                            status.textContent = `Error: ${error.message}`;
-                        } finally {
-                            removeButton.disabled = false;
-                        }
-                    });
-                    
-                    // For continue watching items with series path, the preview is inside a link
                     const previewElement = item.seriesPath 
                         ? card.querySelector('.card-preview-link .card-preview')
                         : card.querySelector('.card-preview');
                     
                     if (previewElement) {
-                        previewElement.appendChild(removeButton);
+                        const actionButton = document.createElement('button');
+                        actionButton.type = 'button';
+                        actionButton.className = 'continue-actions-trigger';
+                        actionButton.title = 'Continue watching actions';
+                        actionButton.setAttribute('aria-haspopup', 'menu');
+                        actionButton.setAttribute('aria-expanded', 'false');
+                        actionButton.innerHTML = `<svg fill="currentColor" viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><circle cx="10" cy="4" r="1.6"></circle><circle cx="10" cy="10" r="1.6"></circle><circle cx="10" cy="16" r="1.6"></circle></svg>`;
+
+                        const actionMenu = document.createElement('div');
+                        actionMenu.className = 'continue-actions-menu';
+                        actionMenu.hidden = true;
+
+                        const actionDefinitions = [
+                            { id: 'start-over', label: 'Start from beginning' },
+                            { id: 'mark-watched', label: 'Mark as watched' },
+                            { id: 'remove', label: item.seriesPath ? 'Remove series from row' : 'Remove from row' }
+                        ];
+
+                        for (const definition of actionDefinitions) {
+                            const button = document.createElement('button');
+                            button.type = 'button';
+                            button.dataset.cwAction = definition.id;
+                            button.textContent = definition.label;
+                            actionMenu.appendChild(button);
+                        }
+
+                        actionButton.addEventListener('click', (event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            toggleContinueWatchingMenu(actionMenu, actionButton);
+                        });
+
+                        actionMenu.addEventListener('click', async (event) => {
+                            const actionTarget = event.target.closest('button[data-cw-action]');
+                            if (!actionTarget) {
+                                return;
+                            }
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const menuButtons = [actionButton, ...actionMenu.querySelectorAll('button')];
+                            menuButtons.forEach((button) => {
+                                button.disabled = true;
+                            });
+                            try {
+                                await runContinueWatchingItemAction(item, actionTarget.dataset.cwAction);
+                            } catch (error) {
+                                console.error('Failed continue watching item action:', error);
+                                setStatusMessage(`Error: ${error.message}`, 2600);
+                            } finally {
+                                menuButtons.forEach((button) => {
+                                    button.disabled = false;
+                                });
+                            }
+                        });
+
+                        actionMenu.addEventListener('keydown', (event) => {
+                            if (event.key === 'Escape') {
+                                event.stopPropagation();
+                                closeContinueWatchingMenu();
+                                actionButton.focus();
+                            }
+                        });
+                        actionMenu.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                        });
+
+                        previewElement.append(actionButton, actionMenu);
                     }
                 }
 
@@ -806,6 +882,33 @@
                 arrowsContainer.className = 'scroll-arrows';
                 const actionsContainer = document.createElement('div');
                 actionsContainer.className = 'category-actions';
+                if (isContinueWatching) {
+                    const bulkActions = document.createElement('div');
+                    bulkActions.className = 'continue-actions-bulk';
+
+                    const resetAllButton = document.createElement('button');
+                    resetAllButton.type = 'button';
+                    resetAllButton.className = 'inline-action-button';
+                    resetAllButton.textContent = 'Reset All';
+                    resetAllButton.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void runContinueWatchingBulkAction('clear', resetAllButton);
+                    });
+
+                    const markAllWatchedButton = document.createElement('button');
+                    markAllWatchedButton.type = 'button';
+                    markAllWatchedButton.className = 'inline-action-button';
+                    markAllWatchedButton.textContent = 'Mark All Watched';
+                    markAllWatchedButton.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void runContinueWatchingBulkAction('mark-watched', markAllWatchedButton);
+                    });
+
+                    bulkActions.append(resetAllButton, markAllWatchedButton);
+                    actionsContainer.appendChild(bulkActions);
+                }
 
                 const wrapper = document.createElement('div');
                 wrapper.className = 'row-wrapper';
@@ -1037,7 +1140,6 @@
                         return;
                     }
                     const results = Array.isArray(data.results) ? data.results : [];
-                    rememberSearch(query);
                     renderSearchAssist({ query, resultCount: results.length });
 
                     if (results.length === 0) {
@@ -1553,12 +1655,6 @@
                     }
                 });
                 searchAssist?.addEventListener('click', (event) => {
-                    const actionButton = event.target.closest('[data-search-action]');
-                    if (actionButton?.dataset.searchAction === 'clear-history') {
-                        clearRecentSearches();
-                        renderSearchAssist({ query: searchInput.value.trim() });
-                        return;
-                    }
                     const button = event.target.closest('[data-search-query]');
                     if (!button) {
                         return;
@@ -1617,6 +1713,7 @@
             window.addEventListener('click', () => {
                 contextMenu.style.display = 'none';
                 folderOptionsMenu.style.display = 'none';
+                closeContinueWatchingMenu();
             });
 
             closeThumbnailPickerButton.addEventListener('click', closeThumbnailPicker);
