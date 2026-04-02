@@ -20,6 +20,12 @@
             --border: rgba(255, 193, 204, 0.24);
             --app-menu-max-width: 1200px;
             --app-menu-gap: 1.5rem;
+            --fullscreen-edge-gap: clamp(1rem, 1.45vw, 1.85rem);
+            --join-overlay-top-gap: 28px;
+            --join-overlay-bottom-gap: 24px;
+            --join-overlay-mobile-top-gap: 18px;
+            --join-overlay-mobile-bottom-gap: 12px;
+            --mobile-shell-edge: 0.375rem;
             --motion-fast: 160ms;
             --motion-medium: 240ms;
             --motion-slow: 420ms;
@@ -70,6 +76,19 @@
         body.join-overlay-visible .app-menu {
             opacity: 0.56;
             transform: translateX(-50%) translateY(-8px) scale(0.988);
+        }
+        body.join-overlay-visible .player-container {
+            pointer-events: none;
+        }
+        body.join-overlay-visible #join-overlay {
+            pointer-events: auto;
+        }
+        body.join-overlay-visible #click-interceptor,
+        body.join-overlay-visible #player-ui-container,
+        body.join-overlay-visible .side-controls,
+        body.join-overlay-visible .fullscreen-back-button,
+        body.join-overlay-visible #mobile-player-shell {
+            pointer-events: none !important;
         }
         .app-menu-brand {
             min-width: 0;
@@ -139,7 +158,7 @@
         }
         .status-fullscreen {
             text-align: center;
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
             width: 100%;
@@ -347,7 +366,9 @@
         .settings-group select:focus-visible,
         .subtitle-style-swatch:focus-visible,
         .subtitle-style-segment:focus-visible,
-        #presence-status:focus-visible {
+        #presence-status:focus-visible,
+        #user-count-display:focus-visible,
+        #invite-menu-copy:focus-visible {
             outline: 2px solid var(--primary);
             outline-offset: 2px;
         }
@@ -509,26 +530,26 @@
              width: 80px;
         }
         
-        /* New Combined Settings Panel */
         #combined-settings-panel {
             display: none;
-            position: absolute;
-            bottom: calc(100% + 10px); /* Position above the control bar */
-            right: 0;
-            background: linear-gradient(180deg, rgba(34, 34, 34, 0.98), rgba(24, 24, 24, 0.96));
-            border: 1px solid var(--border);
-            border-radius: 1.1rem;
-            padding: 1rem;
-            width: 320px;
-            max-width: min(340px, calc(100vw - 2rem));
-            max-height: min(72vh, 520px);
-            overflow-y: auto;
+            position: fixed;
+            inset: 0;
+            padding: 1.25rem;
+            overflow: hidden;
+            background: rgba(2, 2, 4, 0.92);
             opacity: 0;
             visibility: hidden;
             pointer-events: none;
-            transform: translateY(12px) scale(0.985);
-            box-shadow: 0 22px 48px rgba(0, 0, 0, 0.32);
-            transition: opacity var(--motion-medium) ease, visibility var(--motion-medium) ease, transform var(--motion-medium) var(--ease-standard), box-shadow var(--motion-medium) ease;
+            z-index: 60;
+            transition: opacity var(--motion-medium) ease, visibility var(--motion-medium) ease;
+        }
+        #combined-settings-panel.is-open {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
         }
         #combined-settings-panel::-webkit-scrollbar {
             width: 10px;
@@ -538,35 +559,174 @@
             border-radius: 999px;
             border: 2px solid rgba(26, 22, 23, 0.92);
         }
-        #combined-settings-panel.is-open {
-            opacity: 1;
-            visibility: visible;
-            pointer-events: auto;
+        .settings-panel-shell {
+            position: relative;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            width: min(44rem, calc(100vw - 3rem));
+            height: min(42rem, calc(100dvh - 3rem));
+            max-height: calc(100dvh - 3rem);
+            margin: 0;
+            overflow: hidden;
+            border-radius: 1.6rem;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background:
+                linear-gradient(180deg, rgba(8, 8, 10, 0.98), rgba(3, 3, 5, 0.97)),
+                radial-gradient(circle at top left, rgba(255, 193, 204, 0.12), transparent 34%);
+            box-shadow: 0 32px 60px rgba(0, 0, 0, 0.42);
+            transform: translateY(18px) scale(0.985);
+            transition: transform var(--motion-medium) var(--ease-standard), box-shadow var(--motion-medium) ease;
+        }
+        #combined-settings-panel.is-open .settings-panel-shell {
             transform: translateY(0) scale(1);
         }
         .settings-panel-header {
-            display: none;
+            display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 1rem;
-            margin-bottom: 1rem;
+            padding: 1.1rem 1.25rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: linear-gradient(180deg, rgba(12, 12, 14, 0.98), rgba(9, 9, 11, 0.95));
         }
         .settings-panel-header h3 {
             margin: 0;
-            font-size: 1rem;
+            font-size: clamp(1.25rem, 2vw, 1.8rem);
+            line-height: 1.05;
         }
-        .settings-panel-footer {
+        .settings-panel-title-wrap {
+            flex: 1;
+            min-width: 0;
+            text-align: center;
+        }
+        .settings-panel-kicker {
+            display: block;
+            margin-bottom: 0.22rem;
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+        .settings-panel-subtitle {
+            margin: 0.24rem 0 0;
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+        }
+        .settings-nav-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 2.8rem;
+            min-height: 2.8rem;
+            padding: 0.7rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.04);
+            color: #ffffff;
+            cursor: pointer;
+            transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-fast) ease;
+        }
+        .settings-nav-button:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 193, 204, 0.32);
+            transform: translateY(-1px);
+        }
+        .settings-nav-button[hidden] {
+            visibility: hidden;
+        }
+        .settings-panel-body {
+            min-height: 0;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            touch-action: pan-y;
+            padding: 0;
+        }
+        .settings-view {
             display: none;
-            margin-top: 1rem;
-            padding-top: 0.75rem;
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0.65rem 0;
         }
-        
+        .settings-view.is-active {
+            display: block;
+        }
+        .settings-menu-list {
+            display: grid;
+        }
+        .settings-menu-item {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 1rem;
+            width: 100%;
+            padding: 1.35rem 1.4rem;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            color: #ffffff;
+            text-align: left;
+            cursor: pointer;
+            transition: background-color var(--motion-fast) ease;
+        }
+        .settings-menu-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .settings-menu-copy {
+            min-width: 0;
+        }
+        .settings-menu-label {
+            display: block;
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+        .settings-menu-value {
+            display: block;
+            margin-top: 0.22rem;
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .settings-menu-arrow {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 1.35rem;
+            line-height: 1;
+        }
+        .settings-detail-view {
+            padding: 1rem 1.25rem 1.35rem;
+        }
+        .settings-detail-section {
+            padding: 1rem 0 0;
+        }
+        .settings-detail-eyebrow {
+            display: block;
+            margin-bottom: 0.35rem;
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+        .settings-detail-copy {
+            margin: 0 0 1rem;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+        .settings-card {
+            padding: 1rem;
+            border-radius: 1.05rem;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.03);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+        .settings-card + .settings-card,
+        .settings-card + .settings-group,
+        .settings-group + .settings-card,
+        .settings-group + .settings-group {
+            margin-top: 0.95rem;
+        }
         .settings-group {
-             margin-bottom: 1rem;
-        }
-        .settings-group:last-child {
-            margin-bottom: 0;
+            margin: 0;
         }
         .settings-group h4 {
             margin: 0 0 0.75rem 0;
@@ -878,9 +1038,11 @@
         /* --- End New Player UI Styles --- */
         #subtitle-container {
             position: absolute;
-            bottom: var(--cue-bottom, 150px); /* Position above new controls */
+            bottom: var(--cue-bottom, 178px); /* Standard subtitle baseline above the player controls */
             left: 0;
             right: 0;
+            display: flex;
+            justify-content: center;
             text-align: center;
             pointer-events: none; /* Let clicks pass through to video */
             color: var(--cue-color, white);
@@ -891,6 +1053,9 @@
             padding: 0 1.25rem;
         }
         #subtitle-container span {
+            display: inline-block;
+            max-width: min(92vw, 46rem);
+            margin: 0 auto;
             background-color: rgba(0, 0, 0, var(--cue-bg-alpha, 0));
             padding: var(--cue-padding, 0);
             border-radius: 0.35rem;
@@ -906,6 +1071,7 @@
             position: absolute;
             top: 1rem;
             right: 1rem;
+            appearance: none;
             background: linear-gradient(180deg, rgba(0, 0, 0, 0.76), rgba(16, 16, 16, 0.7));
             border: 1px solid rgba(255, 255, 255, 0.08);
             backdrop-filter: blur(12px);
@@ -923,12 +1089,152 @@
             transition: opacity var(--motion-medium) ease, visibility var(--motion-medium) ease, transform var(--motion-medium) var(--ease-standard);
             pointer-events: none; /* Initially not interactive */
             box-shadow: 0 16px 28px rgba(0, 0, 0, 0.18);
+            cursor: default;
         }
 
         #video-wrapper.ui-visible #user-count-display {
             opacity: 1;
             transform: none;
             pointer-events: auto;
+        }
+        #user-count-display[data-clickable="true"] {
+            cursor: pointer;
+        }
+        #user-count-display[data-clickable="true"]:hover {
+            transform: translateY(-1px);
+            border-color: rgba(255, 193, 204, 0.22);
+            box-shadow: 0 18px 30px rgba(27, 14, 18, 0.18);
+        }
+        #invite-menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 160;
+            display: grid;
+            gap: 0.6rem;
+            min-width: 12.5rem;
+            padding: 0.8rem;
+            border-radius: 0.95rem;
+            border: 1px solid rgba(255, 193, 204, 0.14);
+            background: linear-gradient(180deg, rgba(26, 26, 26, 0.96), rgba(14, 14, 14, 0.94));
+            box-shadow: 0 24px 44px rgba(0, 0, 0, 0.26);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+        #invite-menu[hidden] {
+            display: none !important;
+        }
+        .invite-menu-copy {
+            display: grid;
+            gap: 0.18rem;
+        }
+        .invite-menu-label {
+            color: var(--text-main);
+            font-size: 0.88rem;
+            font-weight: 600;
+        }
+        .invite-menu-meta {
+            color: var(--text-secondary);
+            font-size: 0.76rem;
+        }
+        #invite-menu-copy {
+            min-height: 2.65rem;
+            border-radius: 0.8rem;
+            border: 1px solid rgba(255, 193, 204, 0.16);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-main);
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: transform var(--motion-fast) ease, border-color var(--motion-fast) ease, background-color var(--motion-fast) ease;
+        }
+        #invite-menu-copy:hover {
+            transform: translateY(-1px);
+            border-color: rgba(255, 193, 204, 0.32);
+            background: rgba(255, 255, 255, 0.07);
+        }
+
+        #webcam-dock {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            z-index: 24;
+            display: none;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 0.6rem;
+            pointer-events: none;
+        }
+        #webcam-dock.is-visible {
+            display: flex;
+        }
+        .webcam-card {
+            position: relative;
+            overflow: hidden;
+            border-radius: 1rem;
+            background: linear-gradient(180deg, rgba(0, 0, 0, 0.82), rgba(20, 20, 20, 0.74));
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            box-shadow: 0 18px 34px rgba(0, 0, 0, 0.22);
+            aspect-ratio: 16 / 9;
+        }
+        .webcam-card[hidden] {
+            display: none !important;
+        }
+        .webcam-card.remote {
+            width: min(15rem, 24vw);
+        }
+        .webcam-card.local {
+            width: min(8rem, 14vw);
+        }
+        #webcam-dock[data-layout="local-only"] .webcam-card.local {
+            width: min(10rem, 18vw);
+        }
+        .webcam-video {
+            width: 100%;
+            height: 100%;
+            display: block;
+            object-fit: cover;
+            background: #050505;
+        }
+        .webcam-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 0.85rem;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.8rem;
+            line-height: 1.35;
+            background:
+                radial-gradient(circle at 20% 20%, rgba(255, 193, 204, 0.12), transparent 36%),
+                linear-gradient(180deg, rgba(18, 18, 18, 0.92), rgba(8, 8, 8, 0.78));
+            transition: opacity var(--motion-fast) ease;
+        }
+        .webcam-card.has-video .webcam-placeholder {
+            opacity: 0;
+        }
+        .webcam-badge {
+            position: absolute;
+            left: 0.55rem;
+            bottom: 0.55rem;
+            display: inline-flex;
+            align-items: center;
+            min-height: 1.6rem;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.64);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #fff5f7;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        #webcam-status-copy {
+            margin: 0 0 0.85rem;
         }
 
         #sync-status-badge {
@@ -1016,13 +1322,19 @@
         #presence-status[data-clickable="true"] {
             cursor: pointer;
             pointer-events: auto;
-            color: #fff4f6;
-            border-color: rgba(255, 193, 204, 0.28);
+            color: #ffeef2;
+            border-color: rgba(255, 193, 204, 0.18);
+            background: linear-gradient(180deg, rgba(32, 22, 25, 0.84), rgba(17, 14, 15, 0.8));
+            font-size: 0.78rem;
+            font-weight: 600;
+            padding: 0.28rem 0.62rem;
+            min-height: 0;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
         }
         #presence-status[data-clickable="true"]:hover {
             transform: translateY(-1px);
-            border-color: rgba(255, 193, 204, 0.46);
-            box-shadow: 0 16px 30px rgba(27, 14, 18, 0.22);
+            border-color: rgba(255, 193, 204, 0.32);
+            box-shadow: 0 14px 24px rgba(27, 14, 18, 0.18);
         }
         #presence-status[data-tone="cool"],
         #status-message[data-tone="cool"] {
@@ -1137,6 +1449,25 @@
             max-width: none;
             gap: 0;
         }
+        body.fullscreen-active .fullscreen-back-button {
+            top: max(var(--fullscreen-edge-gap), env(safe-area-inset-top));
+            left: max(var(--fullscreen-edge-gap), env(safe-area-inset-left));
+        }
+        body.fullscreen-active #user-count-display {
+            top: max(var(--fullscreen-edge-gap), env(safe-area-inset-top));
+            right: max(var(--fullscreen-edge-gap), env(safe-area-inset-right));
+        }
+        body.fullscreen-active #status-message {
+            top: max(var(--fullscreen-edge-gap), env(safe-area-inset-top));
+        }
+        body.fullscreen-active #sync-status-badge,
+        body.fullscreen-active #presence-status {
+            display: none !important;
+        }
+        body.fullscreen-active #webcam-dock {
+            top: calc(max(var(--fullscreen-edge-gap), env(safe-area-inset-top)) + 3rem);
+            right: max(var(--fullscreen-edge-gap), env(safe-area-inset-right));
+        }
         body.fullscreen-active.mobile-layout #player-ui-container {
             position: absolute;
             left: 0;
@@ -1153,9 +1484,7 @@
         body.fullscreen-active.mobile-layout #video-wrapper.ui-visible #player-ui-container {
             transform: none;
         }
-        body.fullscreen-active.mobile-layout #sync-status-badge,
-        body.fullscreen-active.mobile-layout #user-count-display,
-        body.fullscreen-active.mobile-layout #presence-status {
+        body.fullscreen-active.mobile-layout #user-count-display {
             position: absolute;
             margin: 0;
             opacity: 0;
@@ -1163,32 +1492,18 @@
             pointer-events: none;
             z-index: 29;
         }
-        body.fullscreen-active.mobile-layout #video-wrapper.ui-visible #sync-status-badge,
-        body.fullscreen-active.mobile-layout #video-wrapper.ui-visible #user-count-display,
-        body.fullscreen-active.mobile-layout #video-wrapper.ui-visible #presence-status {
+        body.fullscreen-active.mobile-layout #video-wrapper.ui-visible #user-count-display {
             opacity: 1;
             visibility: visible;
             pointer-events: auto;
-        }
-        body.fullscreen-active.mobile-layout #sync-status-badge {
-            top: max(0.75rem, env(safe-area-inset-top));
-            left: max(0.75rem, env(safe-area-inset-left));
         }
         body.fullscreen-active.mobile-layout #user-count-display {
             top: max(0.75rem, env(safe-area-inset-top));
             right: max(0.75rem, env(safe-area-inset-right));
         }
-        body.fullscreen-active.mobile-layout #presence-status {
-            top: calc(max(0.75rem, env(safe-area-inset-top)) + 3.15rem);
-            left: max(0.75rem, env(safe-area-inset-left));
-            width: auto;
-            max-width: min(34vw, 6rem);
-        }
         body.fullscreen-active.mobile-layout .fullscreen-back-button,
-        body.fullscreen-active.mobile-layout #user-count-display,
-        body.fullscreen-active.mobile-layout #presence-status {
+        body.fullscreen-active.mobile-layout #user-count-display {
             min-height: 2.35rem;
-            padding: 0.42rem 0.84rem;
             border-radius: 999px;
             background: linear-gradient(180deg, rgba(0, 0, 0, 0.78), rgba(16, 16, 16, 0.72));
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1199,14 +1514,34 @@
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
         }
-        body.fullscreen-active.mobile-layout #presence-status[data-clickable="true"] {
-            background: linear-gradient(180deg, rgba(0, 0, 0, 0.78), rgba(16, 16, 16, 0.72));
-            border-color: rgba(255, 255, 255, 0.08);
-            color: #ffffff;
-            box-shadow: 0 16px 28px rgba(0, 0, 0, 0.18);
+        body.fullscreen-active.mobile-layout .fullscreen-back-button {
+            min-height: 0;
+            border-radius: 0;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
         }
         body.fullscreen-active.mobile-layout #sync-status-badge.is-empty {
             display: none !important;
+        }
+        body.fullscreen-active.mobile-layout #sync-status-badge,
+        body.fullscreen-active.mobile-layout #presence-status {
+            display: none !important;
+        }
+        body.fullscreen-active.mobile-layout #webcam-dock {
+            top: calc(3.2rem + env(safe-area-inset-top));
+            right: max(0.75rem, env(safe-area-inset-right));
+            gap: 0.45rem;
+        }
+        body.fullscreen-active.mobile-layout .webcam-card.remote {
+            width: min(8.25rem, 32vw);
+            border-radius: 0.9rem;
+        }
+        body.fullscreen-active.mobile-layout .webcam-card.local {
+            width: min(4.8rem, 18vw);
+            border-radius: 0.82rem;
         }
         body.fullscreen-active.mobile-layout #combined-settings-panel {
             position: fixed;
@@ -1318,11 +1653,13 @@
             top: 1.5rem;
             left: 1.5rem;
             z-index: 21;
-            background: linear-gradient(180deg, rgba(0, 0, 0, 0.76), rgba(16, 16, 16, 0.7));
+            background: transparent;
             color: white;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 1rem;
-            padding: 0.4rem 0.8rem;
+            border: none;
+            border-radius: 0;
+            width: auto;
+            height: auto;
+            padding: 0;
             cursor: pointer;
             font-size: 0.85rem;
             font-weight: 600;
@@ -1331,14 +1668,14 @@
             transition: opacity var(--motion-medium) ease, transform var(--motion-medium) var(--ease-standard), background-color var(--motion-fast) ease;
             pointer-events: none;
             align-items: center;
-            gap: 0.5rem;
-            min-height: 2.35rem;
-            box-shadow: 0 16px 28px rgba(0, 0, 0, 0.18);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            justify-content: center;
+        }
+        .fullscreen-back-button svg {
+            display: block;
+            filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.34));
         }
         .fullscreen-back-button:hover {
-            background: linear-gradient(180deg, rgba(10, 10, 10, 0.82), rgba(22, 22, 22, 0.78));
+            opacity: 0.88;
         }
         #video-wrapper.ui-visible .fullscreen-back-button {
             opacity: 1;
@@ -1350,7 +1687,6 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            text-align: center;
             gap: 1rem;
             background:
                 radial-gradient(circle at 50% 18%, rgba(255, 193, 204, 0.1), transparent 24%),
@@ -1358,8 +1694,13 @@
             position: absolute;
             inset: 0;
             z-index: 100;
-            padding: max(1.5rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1.5rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
-            overflow: hidden;
+            padding:
+                calc(env(safe-area-inset-top) + 5.4rem + var(--app-menu-gap) + var(--join-overlay-top-gap))
+                max(1rem, env(safe-area-inset-right))
+                calc(env(safe-area-inset-bottom) + var(--join-overlay-bottom-gap))
+                max(1rem, env(safe-area-inset-left));
+            overflow-x: hidden;
+            overflow-y: auto;
             transition: opacity var(--motion-medium) ease, visibility var(--motion-medium) ease;
         }
         #join-overlay::before {
@@ -1383,11 +1724,176 @@
             transform: translateY(18px);
             animation: join-content-in 520ms var(--ease-standard) forwards;
         }
-        #join-overlay > p {
+        #join-overlay > .join-panel {
             animation-delay: 70ms;
         }
-        #join-overlay > button {
+        #join-overlay > .join-skip-copy {
             animation-delay: 130ms;
+        }
+        .join-panel {
+            width: min(100%, var(--app-menu-max-width));
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+            flex-shrink: 0;
+            padding: 1.2rem 1.2rem 1rem;
+            border: 1px solid rgba(255, 193, 204, 0.18);
+            border-radius: 1.25rem;
+            background:
+                linear-gradient(180deg, rgba(40, 40, 40, 0.95), rgba(22, 22, 22, 0.92));
+            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.34);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            text-align: left;
+        }
+        .join-panel-header {
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+        }
+        .join-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            width: fit-content;
+            padding: 0.45rem 0.75rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 193, 204, 0.18);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--accent-soft);
+            font-size: 0.82rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .join-panel h1 {
+            font-size: clamp(1.9rem, 5vw, 2.6rem);
+            color: var(--text-main);
+            margin: 0;
+            line-height: 1.05;
+        }
+        .join-panel p {
+            font-size: clamp(0.98rem, 3vw, 1.08rem);
+            color: var(--text-secondary);
+            margin: 0;
+            line-height: 1.55;
+        }
+        .join-video-summary {
+            display: grid;
+            gap: 0.65rem;
+            padding: 0.95rem 1rem;
+            border-radius: 1rem;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 193, 204, 0.12);
+        }
+        .join-video-label {
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .join-video-title {
+            color: var(--text-main);
+            font-size: 1rem;
+            font-weight: 600;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+        .join-meta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+        }
+        .join-meta-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            min-height: 2rem;
+            padding: 0.45rem 0.75rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 193, 204, 0.12);
+            color: var(--text-secondary);
+            font-size: 0.84rem;
+        }
+        .join-status-list {
+            display: grid;
+            gap: 0.55rem;
+        }
+        .join-status-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.8rem;
+            padding: 0.78rem 0.9rem;
+            border-radius: 0.95rem;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 193, 204, 0.12);
+        }
+        .join-status-indicator {
+            width: 0.8rem;
+            height: 0.8rem;
+            margin-top: 0.25rem;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.03);
+            flex: 0 0 auto;
+        }
+        .join-status-item[data-state="ready"] .join-status-indicator {
+            background: #7dd3fc;
+            box-shadow: 0 0 0 6px rgba(125, 211, 252, 0.12);
+        }
+        .join-status-item[data-state="waiting"] .join-status-indicator {
+            background: #facc15;
+            box-shadow: 0 0 0 6px rgba(250, 204, 21, 0.1);
+        }
+        .join-status-item[data-state="error"] .join-status-indicator {
+            background: #f87171;
+            box-shadow: 0 0 0 6px rgba(248, 113, 113, 0.1);
+        }
+        .join-status-copy {
+            display: grid;
+            gap: 0.18rem;
+            min-width: 0;
+        }
+        .join-status-title {
+            color: var(--text-main);
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+        .join-status-detail {
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            line-height: 1.45;
+        }
+        .join-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+        }
+        .join-debug-trace {
+            display: none;
+            gap: 0.35rem;
+            padding: 0.8rem 0.95rem;
+            border-radius: 0.95rem;
+            border: 1px solid rgba(255, 193, 204, 0.12);
+            background: rgba(255, 255, 255, 0.035);
+        }
+        .join-debug-trace.is-visible {
+            display: grid;
+        }
+        .join-debug-label {
+            color: var(--accent-soft);
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .join-debug-lines {
+            color: rgba(228, 228, 228, 0.78);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.76rem;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
         }
         #join-overlay.is-exiting {
             opacity: 0;
@@ -1466,17 +1972,6 @@
             color: var(--background);
             border-color: transparent;
         }
-        #join-overlay h1 {
-            font-size: clamp(2rem, 6vw, 2.75rem);
-            color: var(--text-main);
-            margin: 0;
-        }
-        #join-overlay p {
-            font-size: clamp(1rem, 3vw, 1.1rem);
-            color: var(--text-secondary);
-            margin: 0;
-            max-width: 32rem;
-        }
         #join-button {
             position: relative;
             overflow: hidden;
@@ -1515,6 +2010,140 @@
         #join-button:active {
             transform: translateY(0);
             filter: brightness(0.98);
+        }
+        #join-button[disabled] {
+            cursor: not-allowed;
+            filter: saturate(0.82);
+            box-shadow: none;
+            transform: none;
+            opacity: 0.74;
+        }
+        #join-copy-button {
+            min-height: 3.4rem;
+            padding: 1rem 1.2rem;
+            border-radius: 0.75rem;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform var(--motion-fast) ease, border-color var(--motion-fast) ease, background-color var(--motion-fast) ease;
+        }
+        #join-copy-button:hover {
+            border-color: var(--primary);
+            transform: translateY(-1px);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        #join-copy-button[hidden] {
+            display: none !important;
+        }
+        .join-skip-copy {
+            width: min(100%, var(--app-menu-max-width));
+            color: rgba(228, 228, 228, 0.64);
+            font-size: 0.84rem;
+            line-height: 1.5;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .join-skip-copy strong {
+            color: var(--text-main);
+        }
+        body.portrait-player-gate {
+            overflow: hidden;
+            background: black;
+        }
+        #portrait-player-gate {
+            position: fixed;
+            inset: 0;
+            z-index: 180;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: max(1.1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1.1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+            background:
+                radial-gradient(circle at 50% 14%, rgba(255, 193, 204, 0.12), transparent 26%),
+                linear-gradient(180deg, rgba(8, 8, 8, 0.985), rgba(14, 14, 14, 0.985));
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+        }
+        body.portrait-player-gate #portrait-player-gate {
+            display: flex;
+        }
+        #portrait-player-gate[hidden] {
+            display: none !important;
+        }
+        .portrait-player-card {
+            width: min(100%, 28rem);
+            display: grid;
+            gap: 0.9rem;
+            padding: 1.2rem;
+            border-radius: 1.2rem;
+            border: 1px solid rgba(255, 193, 204, 0.16);
+            background: linear-gradient(180deg, rgba(26, 26, 26, 0.96), rgba(14, 14, 14, 0.94));
+            box-shadow: 0 26px 52px rgba(0, 0, 0, 0.32);
+            text-align: left;
+        }
+        .portrait-player-tag {
+            display: inline-flex;
+            align-items: center;
+            width: fit-content;
+            min-height: 2rem;
+            padding: 0.35rem 0.7rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 193, 204, 0.2);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--accent-soft);
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .portrait-player-card h2 {
+            margin: 0;
+            font-size: clamp(1.55rem, 6vw, 2rem);
+            line-height: 1.08;
+        }
+        .portrait-player-card p {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 0.98rem;
+            line-height: 1.5;
+        }
+        .portrait-player-title {
+            color: var(--text-main);
+            font-size: 0.92rem;
+            font-weight: 600;
+            line-height: 1.4;
+            padding: 0.8rem 0.9rem;
+            border-radius: 0.9rem;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 193, 204, 0.12);
+        }
+        .portrait-player-actions {
+            display: grid;
+            gap: 0.65rem;
+        }
+        #portrait-gate-rotate {
+            min-height: 3.35rem;
+            width: 100%;
+            border-radius: 0.82rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform var(--motion-fast) ease, border-color var(--motion-fast) ease, background-color var(--motion-fast) ease, box-shadow var(--motion-medium) ease;
+        }
+        #portrait-gate-rotate {
+            border: none;
+            background: var(--primary);
+            color: var(--background);
+            box-shadow: 0 14px 34px rgba(255, 193, 204, 0.18);
+        }
+        #portrait-gate-rotate:hover {
+            transform: translateY(-1px);
+        }
+        #portrait-gate-rotate:hover {
+            box-shadow: 0 18px 38px rgba(255, 193, 204, 0.24);
         }
         #play-prompt-overlay {
             background: rgba(0, 0, 0, 0.6);
@@ -1649,11 +2278,11 @@
                 gap: 0.75rem;
             }
             #combined-settings-panel {
-                width: auto;
-                max-width: none;
-                left: 0.75rem;
-                right: 0.75rem;
-                bottom: calc(100% + 0.5rem);
+                padding: 0.9rem;
+            }
+            .settings-panel-shell {
+                width: min(42rem, calc(100vw - 1.8rem));
+                max-height: calc(100dvh - 1.8rem);
             }
             #status-message {
                 top: auto;
@@ -1667,50 +2296,153 @@
                 padding-top: calc(env(safe-area-inset-top) + 4.8rem + var(--app-menu-gap));
             }
             .app-menu {
-                width: calc(100% - 0.75rem);
+                width: calc(100% - (var(--mobile-shell-edge) * 2));
                 margin: 0;
-                padding: 0.7rem 0.8rem;
-                gap: 0.75rem;
+                padding: 0.58rem 0.7rem;
+                gap: 0.55rem;
                 top: max(0.4rem, env(safe-area-inset-top));
+                border-radius: 0.9rem;
             }
             .app-menu-brand strong {
-                font-size: 1.15rem;
+                font-size: 1.08rem;
+            }
+            .app-menu-search-shell {
+                gap: 0.4rem;
+                padding: 0.24rem 0.3rem 0.24rem 0.7rem;
+            }
+            .app-menu-search input {
+                padding: 0.56rem 0;
+                font-size: 0.94rem;
+            }
+            .app-menu-button {
+                min-height: 34px;
+                padding: 0.5rem 0.82rem;
             }
             #join-overlay {
                 justify-content: flex-end;
-                padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+                align-items: stretch;
+                padding-left: max(var(--mobile-shell-edge), env(safe-area-inset-left));
+                padding-right: max(var(--mobile-shell-edge), env(safe-area-inset-right));
+                padding-top: calc(env(safe-area-inset-top) + 5.4rem + var(--app-menu-gap) + var(--join-overlay-mobile-top-gap));
+                padding-bottom: calc(env(safe-area-inset-bottom) + var(--join-overlay-mobile-bottom-gap));
+                gap: 0.55rem;
+                overflow-y: hidden;
+            }
+            #join-overlay::before {
+                display: none;
+            }
+            .join-panel {
+                width: 100%;
+                padding: 0.82rem 0.82rem 0.72rem;
+                gap: 0.58rem;
+                max-height: calc(100dvh - (env(safe-area-inset-top) + 5.4rem + var(--app-menu-gap) + var(--join-overlay-mobile-top-gap)) - (env(safe-area-inset-bottom) + var(--join-overlay-mobile-bottom-gap)));
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .join-skip-copy {
+                display: none;
+            }
+            .join-panel-header {
+                gap: 0.45rem;
+            }
+            .join-eyebrow {
+                padding: 0.35rem 0.6rem;
+                font-size: 0.76rem;
+            }
+            .join-panel h1 {
+                font-size: clamp(1.45rem, 6vw, 1.9rem);
+            }
+            .join-panel p {
+                font-size: 0.9rem;
+                line-height: 1.42;
+            }
+            .join-video-summary {
+                gap: 0.45rem;
+                padding: 0.75rem 0.8rem;
+            }
+            .join-video-label {
+                font-size: 0.75rem;
+            }
+            .join-video-title {
+                font-size: 0.95rem;
+                line-height: 1.35;
+            }
+            .join-meta-row {
+                gap: 0.45rem;
+            }
+            .join-meta-pill {
+                min-height: 1.7rem;
+                padding: 0.3rem 0.6rem;
+                font-size: 0.78rem;
+            }
+            .join-status-list {
+                gap: 0.38rem;
+            }
+            .join-status-item {
+                gap: 0.58rem;
+                padding: 0.6rem 0.68rem;
+            }
+            .join-status-indicator {
+                width: 0.72rem;
+                height: 0.72rem;
+                margin-top: 0.18rem;
+            }
+            .join-status-copy {
+                gap: 0.12rem;
+            }
+            .join-status-title {
+                font-size: 0.9rem;
+            }
+            .join-status-detail {
+                font-size: 0.82rem;
+                line-height: 1.35;
+            }
+            .join-actions {
+                flex-direction: column;
+                gap: 0.48rem;
             }
             #join-button {
                 width: min(100%, 24rem);
+                padding: 0.75rem 1.05rem;
+            }
+            #join-copy-button {
+                width: 100%;
+                padding: 0.72rem 0.95rem;
             }
             #breadcrumb-nav {
                 display: none;
             }
             .player-container {
-                width: 100%;
+                width: calc(100% - (var(--mobile-shell-edge) * 2));
                 max-width: none;
                 min-height: auto;
-                gap: 0.35rem;
+                gap: 0.65rem;
+                margin: 0 auto;
                 padding-bottom: calc(1rem + env(safe-area-inset-bottom));
             }
             #video-title {
                 display: block;
-                font-size: 0.95rem;
+                font-size: 0.92rem;
                 font-weight: 600;
                 text-align: left;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                padding: max(0.75rem, env(safe-area-inset-top)) 1rem 0.2rem;
+                padding: 0.75rem 0.9rem;
                 margin: 0;
+                border-radius: 0.95rem;
+                border: 1px solid rgba(255, 193, 204, 0.12);
+                background: linear-gradient(180deg, rgba(34, 34, 34, 0.94), rgba(24, 24, 24, 0.9));
+                box-shadow: 0 18px 34px rgba(0, 0, 0, 0.16);
             }
             #video-wrapper {
-                border-radius: 0;
-                overflow: visible;
-                background: transparent;
+                border-radius: 1.05rem;
+                overflow: hidden;
+                background: #000;
+                box-shadow: 0 22px 42px rgba(0, 0, 0, 0.22);
             }
             #video-wrapper #video-player {
-                border-radius: 0;
+                border-radius: inherit;
                 background: black;
             }
             #mobile-play-toggle {
@@ -1728,27 +2460,31 @@
             #mobile-player-shell {
                 display: flex;
                 flex-direction: column;
-                gap: 0.45rem;
-                margin-top: 0.9rem;
-                padding: 0.65rem max(0.9rem, env(safe-area-inset-right)) 0 max(0.9rem, env(safe-area-inset-left));
+                gap: 0.55rem;
+                margin-top: 0.15rem;
+                padding: 0.15rem 0 0;
                 opacity: 1;
                 pointer-events: auto;
             }
             #mobile-status-row {
-                display: flex;
-                flex-direction: column;
-                gap: 0.35rem;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                align-items: center;
+                gap: 0.55rem;
             }
             #mobile-badge-row {
                 display: flex;
                 align-items: center;
                 flex-wrap: wrap;
-                gap: 0.45rem;
+                gap: 0.4rem;
+                min-width: 0;
             }
             #mobile-info-stack {
                 display: flex;
                 flex-direction: column;
-                gap: 0.35rem;
+                align-items: flex-end;
+                gap: 0.25rem;
+                min-width: 0;
             }
             .mobile-layout #player-ui-container,
             .mobile-layout #sync-status-badge,
@@ -1769,7 +2505,7 @@
                 max-width: none;
                 padding: 0;
                 box-sizing: border-box;
-                margin-top: 0.35rem;
+                margin-top: 0;
                 filter: none;
             }
             #click-interceptor {
@@ -1790,27 +2526,57 @@
                 display: none !important;
             }
             .mobile-layout #presence-status {
-                align-self: flex-start;
+                align-self: flex-end;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 margin: 0;
-                padding: 0.36rem 0.78rem;
+                padding: 0.5rem 0.9rem;
                 border-radius: 999px;
-                background: rgba(0, 0, 0, 0.84);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background: linear-gradient(180deg, rgba(42, 24, 30, 0.92), rgba(20, 15, 18, 0.88));
+                border: 1px solid rgba(255, 193, 204, 0.22);
                 color: var(--text-main);
                 font-size: 0.8rem;
                 font-weight: 600;
-                max-width: 100%;
+                min-height: 2.25rem;
+                max-width: min(100%, 11rem);
+                box-shadow: 0 12px 22px rgba(0, 0, 0, 0.14);
             }
             .mobile-layout #presence-status[data-clickable="true"] {
-                background: linear-gradient(180deg, rgba(54, 28, 36, 0.9), rgba(25, 17, 20, 0.82));
-                border-color: rgba(255, 193, 204, 0.4);
-                color: #fff4f6;
+                background: linear-gradient(180deg, rgba(48, 28, 34, 0.9), rgba(24, 18, 20, 0.86));
+                border-color: rgba(255, 193, 204, 0.24);
+                color: #ffeef2;
+                padding: 0.38rem 0.72rem;
+                min-height: 1.9rem;
+                font-size: 0.76rem;
+                box-shadow: 0 10px 18px rgba(0, 0, 0, 0.12);
             }
             body.fullscreen-active.mobile-layout #presence-status {
                 max-width: 5.75rem;
+            }
+            .mobile-layout #webcam-dock {
+                top: calc(3.15rem + env(safe-area-inset-top));
+                right: max(0.75rem, env(safe-area-inset-right));
+                gap: 0.45rem;
+            }
+            .mobile-layout .webcam-card.remote {
+                width: min(8.2rem, 34vw);
+                border-radius: 0.92rem;
+            }
+            .mobile-layout .webcam-card.local {
+                width: min(4.8rem, 22vw);
+                border-radius: 0.82rem;
+            }
+            .mobile-layout .webcam-placeholder {
+                font-size: 0.72rem;
+                padding: 0.6rem;
+            }
+            .mobile-layout .webcam-badge {
+                left: 0.45rem;
+                bottom: 0.45rem;
+                font-size: 0.66rem;
+                min-height: 1.45rem;
+                padding: 0.16rem 0.46rem;
             }
             .mobile-layout #status-message {
                 position: static;
@@ -1833,16 +2599,17 @@
                 display: block;
             }
             .mobile-layout .player-controls-background {
-                border-radius: 1rem;
-                padding: 0.7rem 0.85rem 0.8rem;
-                background-color: rgba(0, 0, 0, 0.9);
-                gap: 0.25rem;
-                max-width: 430px;
-                margin: 0 auto;
+                border-radius: 1.05rem;
+                padding: 0.75rem 0.8rem 0.85rem;
+                background: linear-gradient(180deg, rgba(10, 10, 10, 0.94), rgba(0, 0, 0, 0.92));
+                gap: 0.45rem;
+                max-width: none;
+                margin: 0;
+                box-shadow: 0 20px 38px rgba(0, 0, 0, 0.18);
             }
             .mobile-layout .progress-bar-container {
-                height: 16px;
-                margin-bottom: 0.35rem;
+                height: 14px;
+                margin-bottom: 0.15rem;
             }
             .mobile-layout #seek-tooltip {
                 display: none !important;
@@ -1850,7 +2617,11 @@
             .mobile-layout .main-controls {
                 display: grid;
                 grid-template-columns: 1fr;
-                gap: 0.45rem;
+                grid-template-areas:
+                    "time"
+                    "transport"
+                    "utility";
+                gap: 0.55rem;
             }
             .mobile-layout .side-controls.left,
             .mobile-layout .side-controls.right {
@@ -1860,26 +2631,30 @@
             .mobile-layout #time-display {
                 display: block;
                 font-size: 0.9rem;
+                text-align: center;
+                color: rgba(228, 228, 228, 0.78);
             }
             #volume-bar {
                 display: none;
             }
             .mobile-layout .center-controls {
-                gap: 0.2rem;
-                order: 1;
+                grid-area: transport;
+                gap: 0.3rem;
                 width: 100%;
                 justify-content: space-between;
+                padding: 0 0.05rem;
             }
             .mobile-layout .side-controls {
                 gap: 0.45rem;
             }
             .mobile-layout .side-controls.left {
-                order: 2;
-                justify-content: flex-start;
+                grid-area: time;
+                justify-content: center;
             }
             .mobile-layout .side-controls.right {
-                order: 3;
-                justify-content: flex-end;
+                grid-area: utility;
+                justify-content: space-between;
+                padding: 0 0.1rem;
             }
             #next-episode-countdown .countdown-card {
                 width: 100%;
@@ -1916,6 +2691,8 @@
                 min-height: 40px;
                 width: 40px;
                 height: 40px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                background: rgba(255, 255, 255, 0.04);
             }
             /* Make sure video controls are easily tappable */
             .mobile-layout #play-pause-button {
@@ -1929,14 +2706,16 @@
                 font-size: 0.875rem;
             }
             #combined-settings-panel {
-                position: fixed;
-                inset: 0;
+                padding: 0;
+                background: rgba(5, 5, 7, 0.96);
+            }
+            .settings-panel-shell {
                 width: 100%;
                 max-height: 100dvh;
+                min-height: 100dvh;
                 border-radius: 0;
-                padding: max(1rem, env(safe-area-inset-top)) 1rem calc(1.5rem + env(safe-area-inset-bottom));
-                background: rgba(44, 44, 44, 0.96);
-                z-index: 60;
+                border: none;
+                box-shadow: none;
             }
             body.settings-open #mobile-badge-row,
             body.settings-open #mobile-info-stack > :not(#player-ui-container),
@@ -1946,20 +2725,29 @@
             body.settings-open #video-wrapper > #status-message {
                 display: none !important;
             }
+            body.settings-open #player-ui-container,
+            body.settings-open #click-interceptor,
+            body.settings-open #mobile-play-toggle,
+            body.settings-open .fullscreen-back-button,
+            body.settings-open #webcam-dock {
+                opacity: 0 !important;
+                pointer-events: none !important;
+            }
             .settings-panel-header {
-                display: flex;
                 position: sticky;
                 top: 0;
-                background: rgba(44, 44, 44, 0.96);
-                padding-bottom: 0.75rem;
+                padding: max(1rem, env(safe-area-inset-top)) 1rem 0.95rem;
+                background: rgba(2, 2, 4, 0.985);
                 z-index: 2;
             }
-            .settings-panel-footer {
-                display: block;
-                position: sticky;
-                bottom: calc(env(safe-area-inset-bottom) * -1);
-                background: rgba(44, 44, 44, 0.96);
-                padding-bottom: calc(0.25rem + env(safe-area-inset-bottom));
+            .settings-panel-body {
+                padding-bottom: calc(1.2rem + env(safe-area-inset-bottom));
+            }
+            .settings-menu-item {
+                padding: 1.2rem 1rem;
+            }
+            .settings-detail-view {
+                padding: 0.95rem 1rem 1.2rem;
             }
         }
         @media (max-height: 520px) and (orientation: landscape) {
@@ -1973,10 +2761,10 @@
                 padding: max(1rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left));
                 gap: 0.75rem;
             }
-            #join-overlay h1 {
+            .join-panel h1 {
                 font-size: clamp(1.6rem, 4vw, 2.1rem);
             }
-            #join-overlay p {
+            .join-panel p {
                 font-size: 0.95rem;
                 max-width: 28rem;
             }
@@ -2063,6 +2851,16 @@
                 gap: 0.3rem;
                 justify-content: center;
             }
+            body.compact-landscape .player-button {
+                min-width: 40px;
+                min-height: 40px;
+                width: 40px;
+                height: 40px;
+            }
+            body.compact-landscape #play-pause-button {
+                width: 48px;
+                height: 48px;
+            }
             body.compact-landscape .side-controls {
                 gap: 0.45rem;
             }
@@ -2078,9 +2876,7 @@
             body.compact-landscape #volume-bar {
                 display: none;
             }
-            body.compact-landscape #sync-status-badge,
             body.compact-landscape #user-count-display,
-            body.compact-landscape #presence-status,
             body.compact-landscape #status-message {
                 position: absolute;
                 opacity: 0;
@@ -2090,32 +2886,17 @@
             body.compact-landscape #sync-status-badge.is-empty {
                 display: none !important;
             }
-            body.compact-landscape #video-wrapper.ui-visible #sync-status-badge,
             body.compact-landscape #video-wrapper.ui-visible #user-count-display,
-            body.compact-landscape #video-wrapper.ui-visible #presence-status,
             body.compact-landscape #status-message.visible {
                 opacity: 1;
                 visibility: visible;
                 pointer-events: auto;
-            }
-            body.compact-landscape #sync-status-badge {
-                top: max(0.75rem, env(safe-area-inset-top));
-                left: max(0.75rem, env(safe-area-inset-left));
-                font-size: 0.78rem;
-                padding: 0.32rem 0.7rem;
             }
             body.compact-landscape #user-count-display {
                 top: max(0.75rem, env(safe-area-inset-top));
                 right: max(0.75rem, env(safe-area-inset-right));
                 font-size: 0.78rem;
                 padding: 0.32rem 0.7rem;
-            }
-            body.compact-landscape #presence-status {
-                top: calc(max(0.75rem, env(safe-area-inset-top)) + 2.35rem);
-                left: max(0.75rem, env(safe-area-inset-left));
-                max-width: min(28vw, 7rem);
-                font-size: 0.78rem;
-                padding: 0.32rem 0.72rem;
             }
             body.compact-landscape #status-message {
                 top: max(0.75rem, env(safe-area-inset-top));
@@ -2129,6 +2910,28 @@
                 bottom: 1.35rem;
                 font-size: 1rem;
             }
+            body.compact-landscape #sync-status-badge,
+            body.compact-landscape #presence-status {
+                display: none !important;
+            }
+            body.compact-landscape #webcam-dock {
+                top: max(3rem, calc(2.4rem + env(safe-area-inset-top)));
+                right: max(0.75rem, env(safe-area-inset-right));
+                gap: 0.4rem;
+            }
+            body.compact-landscape .webcam-card.remote {
+                width: min(8rem, 24vw);
+                border-radius: 0.88rem;
+            }
+            body.compact-landscape .webcam-card.local {
+                width: min(4.4rem, 14vw);
+                border-radius: 0.8rem;
+            }
+            body.compact-landscape .webcam-badge {
+                font-size: 0.64rem;
+                padding: 0.15rem 0.42rem;
+                min-height: 1.35rem;
+            }
             body.compact-landscape #video-wrapper.ui-visible #subtitle-container {
                 bottom: 4.6rem;
             }
@@ -2139,20 +2942,37 @@
                 font-size: 0.85rem;
             }
             body.compact-landscape #combined-settings-panel {
-                position: fixed;
-                inset: 0;
+                padding: 0;
+                background: rgba(2, 2, 4, 0.985);
+            }
+            body.compact-landscape .settings-panel-shell {
                 width: 100%;
                 max-height: 100dvh;
+                min-height: 100dvh;
                 border-radius: 0;
-                padding: max(0.85rem, env(safe-area-inset-top)) 1rem calc(1rem + env(safe-area-inset-bottom));
-                background: rgba(44, 44, 44, 0.97);
-                z-index: 60;
+                border: none;
+                box-shadow: none;
             }
             body.settings-open.compact-landscape #sync-status-badge,
             body.settings-open.compact-landscape #user-count-display,
             body.settings-open.compact-landscape #presence-status,
             body.settings-open.compact-landscape #status-message {
                 display: none !important;
+            }
+            body.settings-open.compact-landscape #player-ui-container,
+            body.settings-open.compact-landscape #click-interceptor,
+            body.settings-open.compact-landscape #mobile-play-toggle,
+            body.settings-open.compact-landscape .fullscreen-back-button,
+            body.settings-open.compact-landscape #webcam-dock {
+                opacity: 0 !important;
+                pointer-events: none !important;
+            }
+            body.compact-landscape .settings-panel-header {
+                padding: max(0.8rem, env(safe-area-inset-top)) 1rem 0.85rem;
+                background: rgba(2, 2, 4, 0.985);
+            }
+            body.compact-landscape .settings-panel-body {
+                padding-bottom: calc(0.85rem + env(safe-area-inset-bottom));
             }
         }
         @media (hover: none) {
@@ -2184,9 +3004,66 @@
         </form>
     </header>
     <div id="join-overlay">
-        <h1>Tvstack</h1>
-        <p>Click below to join the video session.</p>
-        <button id="join-button">Join Session</button>
+        <section class="join-panel" aria-live="polite">
+            <div class="join-panel-header">
+                <div class="join-eyebrow">Watch Together Lobby</div>
+                <h1 id="join-heading">Get ready together</h1>
+                <p id="join-copy">Settle both screens first, then start with the opening seconds already in place.</p>
+            </div>
+            <div class="join-video-summary">
+                <div class="join-video-label">Current video</div>
+                <div id="join-video-title" class="join-video-title">Loading video...</div>
+                <div class="join-meta-row">
+                    <div class="join-meta-pill">Room <strong id="join-room-code">------</strong></div>
+                    <div id="join-meta-mode" class="join-meta-pill">Preparing room...</div>
+                </div>
+            </div>
+            <div class="join-status-list">
+                <div id="join-status-self" class="join-status-item" data-state="waiting">
+                    <div class="join-status-indicator"></div>
+                    <div class="join-status-copy">
+                        <div class="join-status-title">Your device</div>
+                        <div class="join-status-detail">One quick check and this screen is ready to roll.</div>
+                    </div>
+                </div>
+                <div id="join-status-partner" class="join-status-item" data-state="waiting">
+                    <div class="join-status-indicator"></div>
+                    <div class="join-status-copy">
+                        <div class="join-status-title">Partner</div>
+                        <div class="join-status-detail">Waiting for the other screen to show up.</div>
+                    </div>
+                </div>
+                <div id="join-status-stream" class="join-status-item" data-state="waiting">
+                    <div class="join-status-indicator"></div>
+                    <div class="join-status-copy">
+                        <div class="join-status-title">Opening seconds</div>
+                        <div class="join-status-detail">We are lining up the start so it feels clean on both sides.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="join-actions">
+                <button id="join-button">Get Ready</button>
+                <button id="join-copy-button" type="button">Copy Invite Link</button>
+            </div>
+            <div id="join-debug-trace" class="join-debug-trace" hidden>
+                <div class="join-debug-label">iPhone startup trace</div>
+                <div id="join-debug-lines" class="join-debug-lines"></div>
+            </div>
+        </section>
+        <div class="join-skip-copy">
+            <strong>Tip:</strong> get both screens ready first, then start once.
+        </div>
+    </div>
+    <div id="portrait-player-gate" hidden aria-hidden="true">
+        <section class="portrait-player-card" aria-live="polite">
+            <div class="portrait-player-tag">Landscape only</div>
+            <h2>Rotate to keep watching</h2>
+            <p>Portrait mode is off for the player. Turn your phone sideways to keep watching.</p>
+            <div id="portrait-gate-title" class="portrait-player-title">Loading video...</div>
+            <div class="portrait-player-actions">
+                <button id="portrait-gate-rotate" type="button">Open in Landscape</button>
+            </div>
+        </section>
     </div>
 
     <nav id="breadcrumb-nav"></nav>
@@ -2194,15 +3071,13 @@
         <h1 id="video-title"></h1>
         <div id="video-wrapper" style="position: relative;">
             <a id="fullscreen-back-button" class="fullscreen-back-button">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="22" height="22">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="22" height="22" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6L6 18" />
                 </svg>
-                <span>Go Back</span>
             </a>
             <video id="video-player" preload="metadata" playsinline webkit-playsinline 
                    buffered="" 
                    controlslist="nodownload noremoteplayback" 
-                   disablepictureinpicture=""
                    style="object-fit: contain;">
                 Your browser does not support the video tag.
             </video>
@@ -2213,9 +3088,28 @@
                 <p>Click anywhere to begin playback.</p>
             </div>
             <div id="status-message"></div>
-            <div id="user-count-display"></div>
+            <button id="user-count-display" type="button"></button>
             <div id="sync-status-badge"></div>
             <button id="presence-status" type="button"></button>
+            <div id="invite-menu" hidden>
+                <div class="invite-menu-copy">
+                    <div class="invite-menu-label">Share this room</div>
+                    <div id="invite-menu-meta" class="invite-menu-meta">Copy the invite link for your partner.</div>
+                </div>
+                <button id="invite-menu-copy" type="button">Copy invite link</button>
+            </div>
+            <div id="webcam-dock" aria-live="polite" data-layout="local-only">
+                <section id="webcam-remote-card" class="webcam-card remote" hidden>
+                    <video id="webcam-remote-video" class="webcam-video" autoplay playsinline muted></video>
+                    <div id="webcam-remote-placeholder" class="webcam-placeholder">Partner camera is off.</div>
+                    <div class="webcam-badge">Partner</div>
+                </section>
+                <section id="webcam-local-card" class="webcam-card local" hidden>
+                    <video id="webcam-local-video" class="webcam-video" autoplay playsinline muted></video>
+                    <div id="webcam-local-placeholder" class="webcam-placeholder">Your camera preview appears here.</div>
+                    <div class="webcam-badge">You</div>
+                </section>
+            </div>
             <div id="subtitle-container"></div>
             <div id="next-episode-countdown">
                 <div class="countdown-card">
@@ -2265,118 +3159,188 @@
                                 <button id="volume-button" class="player-button" title="Mute/Unmute"></button>
                                 <input type="range" id="volume-bar" class="volume-bar" min="0" max="1" step="0.01" value="1">
                             </div>
-                            <button id="pip-button" class="player-button" title="Toggle Picture-in-Picture" style="display: none;">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-4"/><path d="M13 15h8"/><path d="M13 21h8"/><path d="M3 15h8v6H3z"/></svg>
-                            </button>
                             <button id="settings-button" class="player-button" title="Settings">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5.5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18.5" r="1.8"/></svg>
                             </button>
                             <button id="fullscreen-button" class="player-button" title="Toggle Fullscreen"></button>
                         </div>
                     </div>
                 </div>
-                
-                <!-- New Combined Settings Panel -->
-                <div id="combined-settings-panel">
-                    <div class="settings-panel-header">
-                        <h3>Player Settings</h3>
-                        <button id="close-settings-button" class="offset-reset-button" type="button">Go Back</button>
-                    </div>
-                    <div class="settings-group">
-                        <h4>Playback Mode</h4>
-                        <select id="playback-mode-select">
-                            <option value="original">Original</option>
-                            <option value="data-saver">Data Save Mode</option>
-                        </select>
-                    </div>
-                    <div class="settings-group" id="audio-settings-group" style="display: none;">
-                        <h4>Audio</h4>
-                        <select id="audio-track-select"></select>
-                    </div>
-                    <div class="settings-group">
-                        <h4>Sync</h4>
-                        <button id="resync-button" class="offset-reset-button" title="Request a full resync from the current leader">Resync With Partner</button>
-                    </div>
-                    <div class="settings-group" id="subtitles-settings-group" style="display: none;">
-                        <h4>Subtitles</h4>
-                        <p class="subtitle-section-copy">One tap loads the best English subtitle first. Any local or embedded tracks remain available underneath.</p>
-                        <div class="subtitle-buttons" id="subtitle-buttons-container">
-                            <!-- Buttons will be injected by JS -->
+            </div>
+
+            <!-- New Combined Settings Panel -->
+            <div id="combined-settings-panel">
+                    <div class="settings-panel-shell">
+                        <div class="settings-panel-header">
+                            <button id="settings-back-button" class="settings-nav-button" type="button" aria-label="Go back" hidden>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+                            </button>
+                            <div class="settings-panel-title-wrap">
+                                <span id="settings-panel-kicker" class="settings-panel-kicker">Playback</span>
+                                <h3 id="settings-panel-title">Settings</h3>
+                                <p id="settings-panel-subtitle" class="settings-panel-subtitle">Choose what you want to adjust.</p>
+                            </div>
+                            <button id="close-settings-button" class="settings-nav-button" type="button" aria-label="Close settings">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
                         </div>
-                        <div class="subtitle-offset-controls" id="subtitle-offset-controls" style="display: none;">
-                            <h5>Timing Adjustment</h5>
-                            <div class="offset-controls-row">
-                                <button id="subtitle-offset-backward-fine" class="offset-button" title="Move subtitles 100ms backward (G key)">-100ms</button>
-                                <span id="subtitle-offset-display">0ms</span>
-                                <button id="subtitle-offset-forward-fine" class="offset-button" title="Move subtitles 100ms forward (H key)">+100ms</button>
+                        <div class="settings-panel-body">
+                            <div id="settings-home-view" class="settings-view is-active">
+                                <div class="settings-menu-list">
+                                    <button id="settings-home-quality" class="settings-menu-item" type="button" data-settings-target="quality">
+                                        <span class="settings-menu-copy">
+                                            <span class="settings-menu-label">Quality</span>
+                                            <span id="settings-summary-quality" class="settings-menu-value">Original quality</span>
+                                        </span>
+                                        <span class="settings-menu-arrow" aria-hidden="true">›</span>
+                                    </button>
+                                    <button id="settings-home-subtitles" class="settings-menu-item" type="button" data-settings-target="subtitles">
+                                        <span class="settings-menu-copy">
+                                            <span class="settings-menu-label">Subtitles</span>
+                                            <span id="settings-summary-subtitles" class="settings-menu-value">Off</span>
+                                        </span>
+                                        <span class="settings-menu-arrow" aria-hidden="true">›</span>
+                                    </button>
+                                    <button id="settings-home-audio" class="settings-menu-item" type="button" data-settings-target="audio">
+                                        <span class="settings-menu-copy">
+                                            <span class="settings-menu-label">Audio</span>
+                                            <span id="settings-summary-audio" class="settings-menu-value">Original audio</span>
+                                        </span>
+                                        <span class="settings-menu-arrow" aria-hidden="true">›</span>
+                                    </button>
+                                    <button id="settings-home-playback" class="settings-menu-item" type="button" data-settings-target="playback">
+                                        <span class="settings-menu-copy">
+                                            <span class="settings-menu-label">Session</span>
+                                            <span id="settings-summary-playback" class="settings-menu-value">Playback tools</span>
+                                        </span>
+                                        <span class="settings-menu-arrow" aria-hidden="true">›</span>
+                                    </button>
+                                </div>
                             </div>
-                            <button id="subtitle-offset-reset" class="offset-reset-button" title="Reset timing to original">Reset</button>
+
+                            <section id="settings-view-quality" class="settings-view settings-detail-view" data-settings-view="quality">
+                                <div class="settings-detail-section">
+                                    <span class="settings-detail-eyebrow">Quality</span>
+                                    <p class="settings-detail-copy">Choose the playback stream for this screen. Original keeps the full source, Data Save Mode is steadier when mobile playback struggles.</p>
+                                    <div class="settings-card settings-group">
+                                        <h4>Playback mode</h4>
+                                        <select id="playback-mode-select">
+                                            <option value="original">Original</option>
+                                            <option value="data-saver">Data Save Mode</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section id="settings-view-subtitles" class="settings-view settings-detail-view" data-settings-view="subtitles">
+                                <div class="settings-detail-section">
+                                    <span class="settings-detail-eyebrow">Subtitles</span>
+                                    <p class="settings-detail-copy">Pick a subtitle track for both viewers. Timing stays in sync across the room.</p>
+                                    <div class="settings-card settings-group" id="subtitles-settings-group" style="display: none;">
+                                        <h4>Tracks</h4>
+                                        <p class="subtitle-section-copy">One tap loads the best English subtitle first. Any local or embedded tracks remain available underneath.</p>
+                                        <div class="subtitle-buttons" id="subtitle-buttons-container"></div>
+                                        <div class="subtitle-offset-controls" id="subtitle-offset-controls" style="display: none;">
+                                            <h5>Timing Adjustment</h5>
+                                            <div class="offset-controls-row">
+                                                <button id="subtitle-offset-backward-fine" class="offset-button" title="Move subtitles 100ms backward (G key)">-100ms</button>
+                                                <span id="subtitle-offset-display">0ms</span>
+                                                <button id="subtitle-offset-forward-fine" class="offset-button" title="Move subtitles 100ms forward (H key)">+100ms</button>
+                                            </div>
+                                            <button id="subtitle-offset-reset" class="offset-reset-button" title="Reset timing to original">Reset</button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-card settings-group">
+                                        <h4>Subtitle Style</h4>
+                                        <div class="subtitle-style-shell">
+                                            <div class="subtitle-style-preview">
+                                                <span id="subtitle-style-preview-text">The moon rises over Ba Sing Se.</span>
+                                            </div>
+                                            <div class="subtitle-style-control">
+                                                <div class="subtitle-style-control-header">
+                                                    <span class="subtitle-style-control-label">Text size</span>
+                                                    <span id="subtitle-style-size-value" class="subtitle-style-control-value">1.2x</span>
+                                                </div>
+                                                <input id="subtitle-style-size" type="range" min="0.9" max="2.2" step="0.05" value="1.2">
+                                            </div>
+                                            <div class="subtitle-style-control">
+                                                <div class="subtitle-style-control-header">
+                                                    <span class="subtitle-style-control-label">Text color</span>
+                                                    <span class="subtitle-style-control-value">Pick the cleanest look</span>
+                                                </div>
+                                                <div class="subtitle-style-swatches">
+                                                    <button type="button" class="subtitle-style-swatch" data-subtitle-color="#ffffff">
+                                                        <span class="subtitle-style-swatch-dot" style="background:#ffffff;"></span>
+                                                        <span class="subtitle-style-swatch-label">White</span>
+                                                    </button>
+                                                    <button type="button" class="subtitle-style-swatch" data-subtitle-color="#f8f0d8">
+                                                        <span class="subtitle-style-swatch-dot" style="background:#f8f0d8;"></span>
+                                                        <span class="subtitle-style-swatch-label">Warm</span>
+                                                    </button>
+                                                    <button type="button" class="subtitle-style-swatch" data-subtitle-color="#ffe36a">
+                                                        <span class="subtitle-style-swatch-dot" style="background:#ffe36a;"></span>
+                                                        <span class="subtitle-style-swatch-label">Gold</span>
+                                                    </button>
+                                                    <button type="button" class="subtitle-style-swatch" data-subtitle-color="#dff6ff">
+                                                        <span class="subtitle-style-swatch-dot" style="background:#dff6ff;"></span>
+                                                        <span class="subtitle-style-swatch-label">Cool</span>
+                                                    </button>
+                                                </div>
+                                                <input id="subtitle-style-color" type="hidden" value="#ffffff">
+                                            </div>
+                                            <div class="subtitle-style-control">
+                                                <div class="subtitle-style-control-header">
+                                                    <span class="subtitle-style-control-label">Background</span>
+                                                    <span id="subtitle-style-bg-value" class="subtitle-style-control-value">Clear</span>
+                                                </div>
+                                                <div class="subtitle-style-segments">
+                                                    <button type="button" class="subtitle-style-segment" data-subtitle-bg="0">Clear</button>
+                                                    <button type="button" class="subtitle-style-segment" data-subtitle-bg="0.18">Soft</button>
+                                                    <button type="button" class="subtitle-style-segment" data-subtitle-bg="0.34">Solid</button>
+                                                </div>
+                                                <input id="subtitle-style-bg" type="hidden" value="0">
+                                            </div>
+                                            <div class="subtitle-style-control">
+                                                <div class="subtitle-style-control-header">
+                                                    <span class="subtitle-style-control-label">Bottom spacing</span>
+                                                    <span id="subtitle-style-position-value" class="subtitle-style-control-value">Standard</span>
+                                                </div>
+                                                <input id="subtitle-style-position" type="range" min="90" max="220" step="5" value="150">
+                                            </div>
+                                        </div>
+                                        <button id="subtitle-style-reset" class="offset-reset-button secondary-action-button" title="Reset subtitle style settings">Reset Style</button>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section id="settings-view-audio" class="settings-view settings-detail-view" data-settings-view="audio">
+                                <div class="settings-detail-section">
+                                    <span class="settings-detail-eyebrow">Audio</span>
+                                    <p class="settings-detail-copy">Switch the active audio track for this episode. When the room is synced, the change goes to both viewers.</p>
+                                    <div class="settings-card settings-group" id="audio-settings-group" style="display: none;">
+                                        <h4>Audio track</h4>
+                                        <select id="audio-track-select"></select>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section id="settings-view-playback" class="settings-view settings-detail-view" data-settings-view="playback">
+                                <div class="settings-detail-section">
+                                    <span class="settings-detail-eyebrow">Session</span>
+                                    <p class="settings-detail-copy">Use this when the room drifts or one screen needs a clean sync with the current leader.</p>
+                                    <div class="settings-card settings-group">
+                                        <h4>Camera</h4>
+                                        <p id="webcam-status-copy" class="subtitle-section-copy">Join the room first to share your camera.</p>
+                                        <button id="webcam-toggle-button" class="offset-reset-button" type="button">Share Camera</button>
+                                    </div>
+                                    <div class="settings-card settings-group">
+                                        <h4>Sync</h4>
+                                        <button id="resync-button" class="offset-reset-button" title="Request a full resync from the current leader">Resync With Partner</button>
+                                    </div>
+                                </div>
+                            </section>
                         </div>
                     </div>
-                    <div class="settings-group">
-                        <h4>Subtitle Style</h4>
-                        <div class="subtitle-style-shell">
-                            <div class="subtitle-style-preview">
-                                <span id="subtitle-style-preview-text">The moon rises over Ba Sing Se.</span>
-                            </div>
-                            <div class="subtitle-style-control">
-                                <div class="subtitle-style-control-header">
-                                    <span class="subtitle-style-control-label">Text size</span>
-                                    <span id="subtitle-style-size-value" class="subtitle-style-control-value">1.2x</span>
-                                </div>
-                                <input id="subtitle-style-size" type="range" min="0.9" max="2.2" step="0.05" value="1.2">
-                            </div>
-                            <div class="subtitle-style-control">
-                                <div class="subtitle-style-control-header">
-                                    <span class="subtitle-style-control-label">Text color</span>
-                                    <span class="subtitle-style-control-value">Pick the cleanest look</span>
-                                </div>
-                                <div class="subtitle-style-swatches">
-                                    <button type="button" class="subtitle-style-swatch" data-subtitle-color="#ffffff">
-                                        <span class="subtitle-style-swatch-dot" style="background:#ffffff;"></span>
-                                        <span class="subtitle-style-swatch-label">White</span>
-                                    </button>
-                                    <button type="button" class="subtitle-style-swatch" data-subtitle-color="#f8f0d8">
-                                        <span class="subtitle-style-swatch-dot" style="background:#f8f0d8;"></span>
-                                        <span class="subtitle-style-swatch-label">Warm</span>
-                                    </button>
-                                    <button type="button" class="subtitle-style-swatch" data-subtitle-color="#ffe36a">
-                                        <span class="subtitle-style-swatch-dot" style="background:#ffe36a;"></span>
-                                        <span class="subtitle-style-swatch-label">Gold</span>
-                                    </button>
-                                    <button type="button" class="subtitle-style-swatch" data-subtitle-color="#dff6ff">
-                                        <span class="subtitle-style-swatch-dot" style="background:#dff6ff;"></span>
-                                        <span class="subtitle-style-swatch-label">Cool</span>
-                                    </button>
-                                </div>
-                                <input id="subtitle-style-color" type="hidden" value="#ffffff">
-                            </div>
-                            <div class="subtitle-style-control">
-                                <div class="subtitle-style-control-header">
-                                    <span class="subtitle-style-control-label">Background</span>
-                                    <span id="subtitle-style-bg-value" class="subtitle-style-control-value">Clear</span>
-                                </div>
-                                <div class="subtitle-style-segments">
-                                    <button type="button" class="subtitle-style-segment" data-subtitle-bg="0">Clear</button>
-                                    <button type="button" class="subtitle-style-segment" data-subtitle-bg="0.18">Soft</button>
-                                    <button type="button" class="subtitle-style-segment" data-subtitle-bg="0.34">Solid</button>
-                                </div>
-                                <input id="subtitle-style-bg" type="hidden" value="0">
-                            </div>
-                            <div class="subtitle-style-control">
-                                <div class="subtitle-style-control-header">
-                                    <span class="subtitle-style-control-label">Bottom spacing</span>
-                                    <span id="subtitle-style-position-value" class="subtitle-style-control-value">Standard</span>
-                                </div>
-                                <input id="subtitle-style-position" type="range" min="90" max="220" step="5" value="150">
-                            </div>
-                        </div>
-                        <button id="subtitle-style-reset" class="offset-reset-button secondary-action-button" title="Reset subtitle style settings">Reset Style</button>
-                    </div>
-                    <div class="settings-panel-footer">
-                        <button id="close-settings-footer" class="offset-reset-button" type="button">Save Settings</button>
-                    </div>
-                </div>
             </div>
         </div>
         <div id="mobile-player-shell">
