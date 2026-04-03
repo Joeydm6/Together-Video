@@ -516,6 +516,8 @@ const OPENSUBTITLES_API_KEY = String(process.env.OPENSUBTITLES_API_KEY || '').tr
 const OPENSUBTITLES_USERNAME = String(process.env.OPENSUBTITLES_USERNAME || '').trim();
 const OPENSUBTITLES_PASSWORD = String(process.env.OPENSUBTITLES_PASSWORD || '').trim();
 const OPENSUBTITLES_USER_AGENT = String(process.env.OPENSUBTITLES_USER_AGENT || 'TogetherVideo v1').trim();
+const OPENSUBTITLES_RETRY_DELAYS_MS = [400, 1200];
+const OPENSUBTITLES_RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 let openSubtitlesSession = {
     token: null,
     expiresAt: 0
@@ -560,12 +562,64 @@ function openSubtitlesConfigured() {
 function buildOpenSubtitlesHeaders({ authorized = false } = {}) {
     const headers = {
         'Api-Key': OPENSUBTITLES_API_KEY,
-        'User-Agent': OPENSUBTITLES_USER_AGENT
+        'User-Agent': OPENSUBTITLES_USER_AGENT,
+        Accept: 'application/json'
     };
     if (authorized && openSubtitlesSession.token) {
         headers.Authorization = `Bearer ${openSubtitlesSession.token}`;
     }
     return headers;
+}
+
+function getSubtitleProviderStatus(error) {
+    const status = Number(error?.response?.status);
+    return Number.isFinite(status) ? status : null;
+}
+
+function getSubtitleProviderMessage(error) {
+    const status = getSubtitleProviderStatus(error);
+    const providerMessage = error?.response?.data?.errors?.[0]?.detail
+        || error?.response?.data?.message
+        || error?.message
+        || 'Automatic subtitle lookup failed';
+
+    if (status && OPENSUBTITLES_RETRYABLE_STATUSES.has(status)) {
+        return `OpenSubtitles is temporarily unavailable (${status}). Please try again in a few seconds.`;
+    }
+
+    return providerMessage;
+}
+
+function shouldRetrySubtitleProvider(error) {
+    const status = getSubtitleProviderStatus(error);
+    return status != null && OPENSUBTITLES_RETRYABLE_STATUSES.has(status);
+}
+
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withOpenSubtitlesRetry(label, operation) {
+    let attempt = 0;
+    let lastError;
+
+    while (attempt <= OPENSUBTITLES_RETRY_DELAYS_MS.length) {
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = error;
+            if (!shouldRetrySubtitleProvider(error) || attempt >= OPENSUBTITLES_RETRY_DELAYS_MS.length) {
+                throw error;
+            }
+
+            const status = getSubtitleProviderStatus(error);
+            console.warn(`[AUTO_SUBTITLES] ${label} failed with ${status}; retrying (${attempt + 1}/${OPENSUBTITLES_RETRY_DELAYS_MS.length})`);
+            await wait(OPENSUBTITLES_RETRY_DELAYS_MS[attempt]);
+            attempt += 1;
+        }
+    }
+
+    throw lastError;
 }
 
 async function getOpenSubtitlesToken(forceRefresh = false) {
@@ -577,7 +631,7 @@ async function getOpenSubtitlesToken(forceRefresh = false) {
         return openSubtitlesSession.token;
     }
 
-    const response = await axios.post(`${OPENSUBTITLES_API_BASE}/login`, {
+    const response = await withOpenSubtitlesRetry('login', () => axios.post(`${OPENSUBTITLES_API_BASE}/login`, {
         username: OPENSUBTITLES_USERNAME,
         password: OPENSUBTITLES_PASSWORD
     }, {
@@ -586,7 +640,7 @@ async function getOpenSubtitlesToken(forceRefresh = false) {
             'Content-Type': 'application/json'
         },
         timeout: 15000
-    });
+    }));
 
     const token = String(response.data?.token || '').trim();
     if (!token) {
@@ -719,14 +773,14 @@ async function searchAutomaticSubtitle(context) {
         params.tmdb_id = context.tmdbId;
     }
 
-    const response = await axios.get(`${OPENSUBTITLES_API_BASE}/subtitles`, {
+    const response = await withOpenSubtitlesRetry('search', () => axios.get(`${OPENSUBTITLES_API_BASE}/subtitles`, {
         headers: {
             ...buildOpenSubtitlesHeaders({ authorized: true }),
             Authorization: `Bearer ${token}`
         },
         params,
         timeout: 15000
-    });
+    }));
 
     const bestMatch = pickBestAutomaticSubtitle(response.data?.data || [], context);
     if (!bestMatch) {
@@ -737,40 +791,11 @@ async function searchAutomaticSubtitle(context) {
 }
 
 async function downloadAutomaticSubtitle(fileId) {
-    let token = await getOpenSubtitlesToken();
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const token = await getOpenSubtitlesToken(attempt > 0);
 
-    try {
-        const response = await axios.post(`${OPENSUBTITLES_API_BASE}/download`, {
-            file_id: fileId,
-            sub_format: 'srt'
-        }, {
-            headers: {
-                ...buildOpenSubtitlesHeaders({ authorized: true }),
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            timeout: 15000
-        });
-
-        const link = String(response.data?.link || '').trim();
-        if (!link) {
-            throw new Error('Subtitle provider did not return a download link');
-        }
-
-        const subtitleResponse = await axios.get(link, {
-            responseType: 'text',
-            timeout: 20000
-        });
-
-        if (typeof subtitleResponse.data !== 'string' || !subtitleResponse.data.trim()) {
-            throw new Error('Downloaded subtitle file was empty');
-        }
-
-        return subtitleResponse.data;
-    } catch (error) {
-        if (error.response?.status === 401) {
-            token = await getOpenSubtitlesToken(true);
-            const retry = await axios.post(`${OPENSUBTITLES_API_BASE}/download`, {
+        try {
+            const response = await withOpenSubtitlesRetry('download-link', () => axios.post(`${OPENSUBTITLES_API_BASE}/download`, {
                 file_id: fileId,
                 sub_format: 'srt'
             }, {
@@ -780,23 +805,41 @@ async function downloadAutomaticSubtitle(fileId) {
                     'Content-Type': 'application/json'
                 },
                 timeout: 15000
-            });
-            const link = String(retry.data?.link || '').trim();
+            }));
+
+            const link = String(response.data?.link || '').trim();
             if (!link) {
                 throw new Error('Subtitle provider did not return a download link');
             }
-            const subtitleResponse = await axios.get(link, {
+
+            const subtitleResponse = await withOpenSubtitlesRetry('download-file', () => axios.get(link, {
                 responseType: 'text',
-                timeout: 20000
-            });
+                timeout: 20000,
+                headers: {
+                    'User-Agent': OPENSUBTITLES_USER_AGENT,
+                    Accept: 'text/plain,*/*'
+                }
+            }));
+
             if (typeof subtitleResponse.data !== 'string' || !subtitleResponse.data.trim()) {
                 throw new Error('Downloaded subtitle file was empty');
             }
-            return subtitleResponse.data;
-        }
 
-        throw error;
+            return subtitleResponse.data;
+        } catch (error) {
+            if (error.response?.status === 401 && attempt === 0) {
+                openSubtitlesSession = {
+                    token: null,
+                    expiresAt: 0
+                };
+                continue;
+            }
+
+            throw error;
+        }
     }
+
+    throw new Error('OpenSubtitles download could not be authorized');
 }
 
 async function readThumbnailOverrides() {
